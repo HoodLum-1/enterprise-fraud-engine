@@ -1,6 +1,9 @@
 spring:
   application:
     name: fraud-engine
+  jackson:
+    date-format: "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
+    time-zone: UTC
   datasource:
     url: jdbc:postgresql://localhost:5432/fraud_db
     username: postgres
