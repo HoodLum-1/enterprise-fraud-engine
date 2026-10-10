@@ -21,5 +21,25 @@ spring:
     baseline-on-migrate: true
     locations: classpath:db/migration
 
+fraud:
+  engine:
+    rules:
+      high-amount:
+        enabled: true
+        threshold: 50000.00
+        risk-score: 40
+        severity: HIGH
+      velocity:
+        enabled: true
+        threshold: 3
+        window: 2m
+        risk-score: 50
+        severity: CRITICAL
+      location-mismatch:
+        enabled: true
+        time-gap-threshold: 10m
+        risk-score: 60
+        severity: CRITICAL
+
 server:
   port: 8080
