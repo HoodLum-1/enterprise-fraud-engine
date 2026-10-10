@@ -1,0 +1,381 @@
+{
+	"info": {
+		"_postman_id": "a9b8c7d6-e5f4-4321-b123-9876543210ab",
+		"name": "Fraud Engine API Collection",
+		"description": "Postman collection for testing Fraud Engine transaction evaluation, alert management, and Actuator observability endpoints.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8080",
+			"type": "string"
+		},
+		{
+			"key": "accountId",
+			"value": "ACC-TEST-9988",
+			"type": "string"
+		},
+		{
+			"key": "lastTransactionId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "lastAlertId",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "1. Evaluate Clean Low-Risk Transaction",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"const uuid = pm.variables.replaceIn('{{$guid}}');",
+							"pm.collectionVariables.set('currentTxId', uuid);",
+							"pm.collectionVariables.set('currentTimestamp', new Date().toISOString());"
+						],
+						"type": "text/javascript"
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 201 Created', function () {",
+							"    pm.response.to.have.status(201);",
+							"});",
+							"",
+							"const jsonData = pm.response.json();",
+							"pm.test('Clean transaction has 0 risk score and LOW severity', function () {",
+							"    pm.expect(jsonData.cumulativeRiskScore).to.eql(0);",
+							"    pm.expect(jsonData.overallSeverity).to.eql('LOW');",
+							"    pm.expect(jsonData.alerts).to.be.an('array').that.is.empty;",
+							"});",
+							"",
+							"// Update environment/collection variables",
+							"pm.collectionVariables.set('lastTransactionId', jsonData.transactionId);",
+							"pm.collectionVariables.set('accountId', jsonData.accountId);"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"id\": \"{{currentTxId}}\",\n    \"accountId\": \"{{accountId}}\",\n    \"amount\": 250.00,\n    \"currency\": \"ZAR\",\n    \"category\": \"RETAIL\",\n    \"merchantName\": \"Supermarket Express\",\n    \"location\": \"Cape Town\",\n    \"timestamp\": \"{{currentTimestamp}}\"\n}"
+				},
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/transactions/evaluate",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"transactions",
+						"evaluate"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "2. Evaluate High-Amount Transaction (Flags Alert)",
+			"event": [
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"const uuid = pm.variables.replaceIn('{{$guid}}');",
+							"pm.collectionVariables.set('highAmountTxId', uuid);",
+							"pm.collectionVariables.set('currentTimestamp', new Date().toISOString());"
+						],
+						"type": "text/javascript"
+					}
+				},
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 201 Created', function () {",
+							"    pm.response.to.have.status(201);",
+							"});",
+							"",
+							"const jsonData = pm.response.json();",
+							"pm.test('Transaction triggers HighAmountRule', function () {",
+							"    pm.expect(jsonData.cumulativeRiskScore).to.be.at.least(40);",
+							"    pm.expect(jsonData.overallSeverity).to.eql('HIGH');",
+							"    pm.expect(jsonData.alerts).to.be.an('array').that.is.not.empty;",
+							"    pm.expect(jsonData.alerts[0].ruleName).to.eql('HighAmountRule');",
+							"});",
+							"",
+							"if (jsonData.alerts && jsonData.alerts.length > 0) {",
+							"    pm.collectionVariables.set('lastAlertId', jsonData.alerts[0].id);",
+							"}",
+							"pm.collectionVariables.set('lastHighAmountTxId', jsonData.transactionId);"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"id\": \"{{highAmountTxId}}\",\n    \"accountId\": \"{{accountId}}\",\n    \"amount\": 75000.00,\n    \"currency\": \"ZAR\",\n    \"category\": \"ELECTRONICS\",\n    \"merchantName\": \"Luxury Tech Cape Town\",\n    \"location\": \"Cape Town\",\n    \"timestamp\": \"{{currentTimestamp}}\"\n}"
+				},
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/transactions/evaluate",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"transactions",
+						"evaluate"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "3. Evaluate Duplicate Transaction (Idempotency 409 Conflict)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 409 Conflict', function () {",
+							"    pm.response.to.have.status(409);",
+							"});",
+							"",
+							"const jsonData = pm.response.json();",
+							"pm.test('ProblemDetail indicates conflict for duplicate ID', function () {",
+							"    pm.expect(jsonData.status).to.eql(409);",
+							"    pm.expect(jsonData.title).to.eql('Conflict');",
+							"    pm.expect(jsonData.detail).to.include('already exists');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"id\": \"{{lastTransactionId}}\",\n    \"accountId\": \"{{accountId}}\",\n    \"amount\": 250.00,\n    \"currency\": \"ZAR\",\n    \"category\": \"RETAIL\",\n    \"merchantName\": \"Supermarket Express\",\n    \"location\": \"Cape Town\",\n    \"timestamp\": \"{{currentTimestamp}}\"\n}"
+				},
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/transactions/evaluate",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"transactions",
+						"evaluate"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "4. Validation Failure (400 Bad Request)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 400 Bad Request', function () {",
+							"    pm.response.to.have.status(400);",
+							"});",
+							"",
+							"const jsonData = pm.response.json();",
+							"pm.test('ProblemDetail contains invalid parameters', function () {",
+							"    pm.expect(jsonData.status).to.eql(400);",
+							"    pm.expect(jsonData.invalidParams).to.be.an('object');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"id\": null,\n    \"accountId\": \"\",\n    \"amount\": -100.00,\n    \"currency\": \"INVALID\",\n    \"category\": \"\",\n    \"timestamp\": null\n}"
+				},
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/transactions/evaluate",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"transactions",
+						"evaluate"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "5. Get Fraud Alerts for Account",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200 OK', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"const jsonData = pm.response.json();",
+							"pm.test('Response is an array of alerts', function () {",
+							"    pm.expect(jsonData).to.be.an('array');",
+							"});",
+							"",
+							"if (jsonData.length > 0) {",
+							"    pm.test('Alert contains expected fields', function () {",
+							"        pm.expect(jsonData[0]).to.have.property('id');",
+							"        pm.expect(jsonData[0]).to.have.property('transactionId');",
+							"        pm.expect(jsonData[0]).to.have.property('accountId');",
+							"        pm.expect(jsonData[0]).to.have.property('ruleName');",
+							"        pm.expect(jsonData[0]).to.have.property('riskScore');",
+							"        pm.expect(jsonData[0]).to.have.property('severity');",
+							"        pm.expect(jsonData[0]).to.have.property('reason');",
+							"    });",
+							"}"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/fraud-alerts/account/{{accountId}}",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"fraud-alerts",
+						"account",
+						"{{accountId}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "6. Actuator Health Endpoint",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200 OK', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"const jsonData = pm.response.json();",
+							"pm.test('Health status is UP', function () {",
+							"    pm.expect(jsonData.status).to.eql('UP');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/actuator/health",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"actuator",
+						"health"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "7. Actuator Prometheus Metrics Endpoint",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200 OK', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test('Prometheus metrics format returned', function () {",
+							"    pm.expect(pm.response.text()).to.include('jvm_memory_used_bytes');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/actuator/prometheus",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"actuator",
+						"prometheus"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}

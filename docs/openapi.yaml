@@ -1,0 +1,307 @@
+openapi: 3.0.3
+info:
+  title: Fraud Engine API
+  description: Enterprise real-time transaction fraud evaluation and alert retrieval service.
+  version: 1.0.0
+  contact:
+    name: Capitec Connect Team
+servers:
+  - url: http://localhost:8080
+    description: Local Development Server
+
+paths:
+  /api/v1/transactions/evaluate:
+    post:
+      summary: Evaluate transaction for fraud
+      description: Ingests a new transaction, evaluates it against active fraud rules (high amount, velocity, location anomaly), persists evaluation results and alerts, and returns the evaluation summary.
+      operationId: evaluateTransaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionRequestDto'
+            example:
+              id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+              accountId: "ACC-998877"
+              amount: 55000.00
+              currency: "ZAR"
+              category: "ELECTRONICS"
+              merchantName: "MegaStore Cape Town"
+              location: "Cape Town"
+              timestamp: "2026-10-10T20:00:00Z"
+      responses:
+        '201':
+          description: Transaction evaluated successfully and persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluationSummaryResponseDto'
+              example:
+                transactionId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                accountId: "ACC-998877"
+                cumulativeRiskScore: 40
+                overallSeverity: "HIGH"
+                alerts:
+                  - id: "e2b6c935-d227-44f2-95f3-52467d5d2e38"
+                    transactionId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                    accountId: "ACC-998877"
+                    ruleName: "HighAmountRule"
+                    riskScore: 40
+                    severity: "HIGH"
+                    reason: "Transaction amount 55000.00 exceeds configured threshold of 50000.00"
+                    flaggedAt: "2026-10-10T20:00:01Z"
+                evaluatedAt: "2026-10-10T20:00:01Z"
+        '400':
+          description: Bad Request - Validation error or malformed payload (RFC 7807 Problem Detail).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: "about:blank"
+                title: "Bad Request"
+                status: 400
+                detail: "Validation failed for one or more fields."
+                instance: "/api/v1/transactions/evaluate"
+                invalidParams:
+                  amount: "must be greater than 0"
+                  currency: "must match \"^[A-Z]{3}$\""
+        '409':
+          description: Conflict - Duplicate transaction ID (Idempotency violation) (RFC 7807 Problem Detail).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: "about:blank"
+                title: "Conflict"
+                status: 409
+                detail: "Transaction with ID '3fa85f64-5717-4562-b3fc-2c963f66afa6' already exists."
+                instance: "/api/v1/transactions/evaluate"
+        '500':
+          description: Internal Server Error (RFC 7807 Problem Detail).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+              example:
+                type: "about:blank"
+                title: "Internal Server Error"
+                status: 500
+                detail: "An unexpected error occurred while processing the request."
+                instance: "/api/v1/transactions/evaluate"
+
+  /api/v1/fraud-alerts/account/{accountId}:
+    get:
+      summary: Retrieve fraud alerts for an account
+      description: Fetches all historical fraud alerts triggered for a given account ID, ordered by flagged timestamp descending.
+      operationId: getFraudAlertsByAccount
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          description: Unique identifier of the bank account
+          schema:
+            type: string
+          example: "ACC-998877"
+      responses:
+        '200':
+          description: List of fraud alerts associated with the account.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FraudAlertResponseDto'
+              example:
+                - id: "e2b6c935-d227-44f2-95f3-52467d5d2e38"
+                  transactionId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                  accountId: "ACC-998877"
+                  ruleName: "HighAmountRule"
+                  riskScore: 40
+                  severity: "HIGH"
+                  reason: "Transaction amount 55000.00 exceeds configured threshold of 50000.00"
+                  flaggedAt: "2026-10-10T20:00:01Z"
+        '400':
+          description: Bad Request (RFC 7807 Problem Detail).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '500':
+          description: Internal Server Error (RFC 7807 Problem Detail).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+components:
+  schemas:
+    TransactionRequestDto:
+      type: object
+      required:
+        - id
+        - accountId
+        - amount
+        - currency
+        - category
+        - timestamp
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique transaction identifier (UUID v4)
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        accountId:
+          type: string
+          maxLength: 64
+          description: Account identifier
+          example: "ACC-998877"
+        amount:
+          type: number
+          format: double
+          minimum: 0.01
+          description: Monetary amount (positive, up to 2 decimal places)
+          example: 55000.00
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          description: ISO 4217 3-letter currency code
+          example: "ZAR"
+        category:
+          type: string
+          description: Category of the transaction (e.g. GROCERIES, ELECTRONICS, TRANSFER)
+          example: "ELECTRONICS"
+        merchantName:
+          type: string
+          nullable: true
+          maxLength: 100
+          description: Name of the merchant
+          example: "MegaStore Cape Town"
+        location:
+          type: string
+          nullable: true
+          maxLength: 100
+          description: Location / city of transaction
+          example: "Cape Town"
+        timestamp:
+          type: string
+          format: date-time
+          description: ISO-8601 transaction timestamp (must be in past or present)
+          example: "2026-10-10T20:00:00Z"
+
+    EvaluationSummaryResponseDto:
+      type: object
+      required:
+        - transactionId
+        - accountId
+        - cumulativeRiskScore
+        - overallSeverity
+        - alerts
+        - evaluatedAt
+      properties:
+        transactionId:
+          type: string
+          format: uuid
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        accountId:
+          type: string
+          example: "ACC-998877"
+        cumulativeRiskScore:
+          type: integer
+          description: Sum of risk scores from all triggered rules
+          example: 40
+        overallSeverity:
+          $ref: '#/components/schemas/Severity'
+        alerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/FraudAlertResponseDto'
+        evaluatedAt:
+          type: string
+          format: date-time
+          example: "2026-10-10T20:00:01Z"
+
+    FraudAlertResponseDto:
+      type: object
+      required:
+        - id
+        - transactionId
+        - accountId
+        - ruleName
+        - riskScore
+        - severity
+        - reason
+        - flaggedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "e2b6c935-d227-44f2-95f3-52467d5d2e38"
+        transactionId:
+          type: string
+          format: uuid
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        accountId:
+          type: string
+          example: "ACC-998877"
+        ruleName:
+          type: string
+          example: "HighAmountRule"
+        riskScore:
+          type: integer
+          example: 40
+        severity:
+          $ref: '#/components/schemas/Severity'
+        reason:
+          type: string
+          example: "Transaction amount 55000.00 exceeds configured threshold of 50000.00"
+        flaggedAt:
+          type: string
+          format: date-time
+          example: "2026-10-10T20:00:01Z"
+
+    Severity:
+      type: string
+      enum:
+        - LOW
+        - MEDIUM
+        - HIGH
+        - CRITICAL
+      example: "HIGH"
+
+    ProblemDetail:
+      type: object
+      required:
+        - type
+        - title
+        - status
+      properties:
+        type:
+          type: string
+          format: uri
+          description: A URI reference identifying the problem type
+          example: "about:blank"
+        title:
+          type: string
+          description: A short, human-readable summary of the problem type
+          example: "Bad Request"
+        status:
+          type: integer
+          description: The HTTP status code generated by the origin server
+          example: 400
+        detail:
+          type: string
+          description: A human-readable explanation specific to this occurrence of the problem
+          example: "Validation failed for one or more fields."
+        instance:
+          type: string
+          format: uri-reference
+          description: A URI reference that identifies the specific occurrence of the problem
+          example: "/api/v1/transactions/evaluate"
+        invalidParams:
+          type: object
+          additionalProperties:
+            type: string
+          description: Map of field names to validation error messages (if applicable)
