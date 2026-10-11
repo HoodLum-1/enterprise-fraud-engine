@@ -4,6 +4,7 @@ import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.domain.model.Transaction;
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -25,6 +26,7 @@ public class LocationMismatchRule implements FraudRule {
         this(new FraudEngineProperties());
     }
 
+    @Autowired
     public LocationMismatchRule(FraudEngineProperties properties) {
         this.properties = properties != null ? properties : new FraudEngineProperties();
     }
@@ -46,7 +48,7 @@ public class LocationMismatchRule implements FraudRule {
             return new RuleEvaluationResult(RULE_NAME, false, 0, Severity.LOW, "No location mismatch detected");
         }
 
-        FraudEngineProperties.LocationMismatch config = properties.getLocationMismatch();
+        FraudEngineProperties.LocationMismatch config = properties.getRules().getLocationMismatch();
 
         Transaction mostRecent = accountHistory.stream()
             .filter(tx -> tx != null && tx.timestamp() != null)

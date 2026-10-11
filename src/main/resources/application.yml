@@ -27,6 +27,8 @@ spring:
 
 fraud:
   engine:
+    evaluation:
+      history-window: PT24H
     rules:
       high-amount:
         enabled: true

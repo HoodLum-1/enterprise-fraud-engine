@@ -4,6 +4,7 @@ import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.domain.model.Transaction;
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,7 @@ public class HighAmountRule implements FraudRule {
         this(new FraudEngineProperties());
     }
 
+    @Autowired
     public HighAmountRule(FraudEngineProperties properties) {
         this.properties = properties != null ? properties : new FraudEngineProperties();
     }
@@ -40,7 +42,7 @@ public class HighAmountRule implements FraudRule {
 
     @Override
     public RuleEvaluationResult evaluate(Transaction currentTransaction, List<Transaction> accountHistory) {
-        FraudEngineProperties.HighAmount config = properties.getHighAmount();
+        FraudEngineProperties.HighAmount config = properties.getRules().getHighAmount();
         BigDecimal threshold = config.getThreshold();
         int riskScore = config.getRiskScore();
         Severity severity = config.getSeverity();

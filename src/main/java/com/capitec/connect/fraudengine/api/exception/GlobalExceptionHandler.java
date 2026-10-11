@@ -1,6 +1,7 @@
 package com.capitec.connect.fraudengine.api.exception;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.validation.FieldError;
@@ -55,6 +56,19 @@ public class GlobalExceptionHandler {
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
             HttpStatus.CONFLICT,
             ex.getMessage()
+        );
+        problemDetail.setTitle("Conflict");
+        problemDetail.setType(URI.create("https://api.capitec.com/errors/conflict"));
+        problemDetail.setProperty("timestamp", Instant.now());
+        return problemDetail;
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ProblemDetail handleDataIntegrityViolationException(DataIntegrityViolationException ex) {
+        log.warn("Data integrity violation: {}", ex.getMessage());
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
+            HttpStatus.CONFLICT,
+            "Request conflicts with existing data"
         );
         problemDetail.setTitle("Conflict");
         problemDetail.setType(URI.create("https://api.capitec.com/errors/conflict"));

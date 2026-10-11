@@ -11,12 +11,12 @@ import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
 import com.capitec.connect.fraudengine.infrastructure.mapper.TransactionMapper;
 import com.capitec.connect.fraudengine.infrastructure.repository.FraudAlertRepository;
 import com.capitec.connect.fraudengine.infrastructure.repository.TransactionRepository;
+import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
@@ -31,6 +31,7 @@ public class FraudEvaluationService {
     private final FraudEngine fraudEngine;
     private final TransactionMapper transactionMapper;
     private final FraudAlertMapper fraudAlertMapper;
+    private final FraudEngineProperties engineProperties;
 
     public EvaluationSummary evaluate(TransactionRequestDto dto) {
         log.info("Processing transaction evaluation for id: {}, accountId: {}", dto.id(), dto.accountId());
@@ -44,7 +45,7 @@ public class FraudEvaluationService {
         TransactionEntity transactionEntity = transactionMapper.toEntity(transaction);
         transactionRepository.save(transactionEntity);
 
-        Instant historyCutoff = Instant.now().minus(Duration.ofHours(24));
+        Instant historyCutoff = Instant.now().minus(engineProperties.getEvaluation().getHistoryWindow());
         List<TransactionEntity> historyEntities = transactionRepository
             .findByAccountIdAndTimestampAfterOrderByTimestampDesc(dto.accountId(), historyCutoff);
 

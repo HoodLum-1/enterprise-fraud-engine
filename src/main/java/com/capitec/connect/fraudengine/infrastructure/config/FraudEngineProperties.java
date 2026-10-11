@@ -10,12 +10,23 @@ import java.time.Duration;
 
 @Data
 @Configuration
-@ConfigurationProperties(prefix = "fraud.engine.rules")
+@ConfigurationProperties(prefix = "fraud.engine")
 public class FraudEngineProperties {
 
-    private HighAmount highAmount = new HighAmount();
-    private Velocity velocity = new Velocity();
-    private LocationMismatch locationMismatch = new LocationMismatch();
+    private Evaluation evaluation = new Evaluation();
+    private Rules rules = new Rules();
+
+    @Data
+    public static class Evaluation {
+        private Duration historyWindow = Duration.ofHours(24);
+    }
+
+    @Data
+    public static class Rules {
+        private HighAmount highAmount = new HighAmount();
+        private Velocity velocity = new Velocity();
+        private LocationMismatch locationMismatch = new LocationMismatch();
+    }
 
     @Data
     public static class HighAmount {
