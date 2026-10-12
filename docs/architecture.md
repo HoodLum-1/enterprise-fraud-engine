@@ -103,7 +103,7 @@ Client Request
 │     Map DTO -> Domain Transaction -> TransactionEntity -> Save.       │
 │                                                                        │
 │  3. Historical Data Fetch:                                             │
-│     Retrieve transactions for accountId within last 24h.               │
+│     Retrieve accountId history within the configured window.           │
 │                                                                        │
 │  4. Evaluate Rules:                                                    │
 │     Execute FraudEngine rule chain.                                    │
@@ -116,7 +116,7 @@ Client Request
 ```
 
 #### Idempotency & Relational Integrity:
-- **Idempotency Guarantee**: Primary key UUID collisions are caught early before evaluation or side effects, preserving consistency.
+- **Idempotency Guarantee**: Primary key UUID collisions are caught early before evaluation or side effects. Concurrent duplicates that race past the check still fail on the primary key constraint and are normalized to 409 Conflict by `GlobalExceptionHandler`.
 - **Cascading Foreign Keys**: `fraud_alerts.transaction_id` references `transactions.id` with `ON DELETE CASCADE` to maintain referential integrity.
 - **ACID Compliance**: The entire evaluation, ingestion, and alert generation cycle occurs within a single atomic database transaction.
 
@@ -131,8 +131,8 @@ To support high-throughput, low-latency transaction processing:
    - `minimum-idle`: 5 connections ready for instant workload spikes.
    - `connection-timeout`: 20,000 ms to avoid indefinite thread blocking.
 2. **Database Indexing Strategy**:
-   - `idx_transactions_account_timestamp` on `transactions(account_id, timestamp)`: Accelerates 24-hour sliding window historical lookups.
-   - `idx_fraud_alerts_account_flagged` on `fraud_alerts(account_id, flagged_at)`: Optimizes alert retrieval queries ordered chronologically.
+   - `idx_transactions_account_timestamp` on `transactions(account_id, timestamp)`: Accelerates sliding-window historical lookups (window configurable via `fraud.engine.evaluation.history-window`).
+   - `idx_fraud_alerts_account_flagged_at` on `fraud_alerts(account_id, flagged_at)`: Optimizes alert retrieval queries ordered chronologically.
 3. **Stateless Service Design**:
    - `FraudEngine` and all `FraudRule` beans are stateless Spring singletons, allowing concurrent threads to evaluate transactions without synchronization locks.
 
