@@ -1,12 +1,9 @@
 package com.capitec.connect.fraudengine.util;
 
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
-import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
-import com.capitec.connect.fraudengine.domain.model.FraudAlert;
-import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
-import com.capitec.connect.fraudengine.domain.model.Severity;
-import com.capitec.connect.fraudengine.domain.model.Transaction;
+import com.capitec.connect.fraudengine.domain.model.*;
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudAlertEntity;
+import com.capitec.connect.fraudengine.infrastructure.entity.FraudCaseEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.TransactionEntity;
 
 import java.math.BigDecimal;
@@ -62,6 +59,33 @@ public final class FraudTestDataFactory {
             .severity(Severity.LOW)
             .reason("Test fraud alert")
             .flaggedAt(now);
+    }
+
+    public static FraudCaseEntity.FraudCaseEntityBuilder fraudCaseEntity() {
+        Instant now = Instant.now();
+        return FraudCaseEntity.builder()
+                .id(UUID.randomUUID())
+                .transactionId(UUID.randomUUID())
+                .accountId(ACCOUNT_ID)
+                .totalRiskScore(85)
+                .overallSeverity(Severity.CRITICAL)
+                .status("PENDING_REVIEW")
+                .createdAt(now)
+                .updatedAt(now);
+    }
+
+    public static FraudCase fraudCaseDomain() {
+        Instant now = Instant.now();
+        return new FraudCase(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                ACCOUNT_ID,
+                85,
+                Severity.CRITICAL,
+                "PENDING_REVIEW",
+                now,
+                now
+        );
     }
 
     public static EvaluationSummary evaluationSummary(

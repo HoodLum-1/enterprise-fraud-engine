@@ -24,7 +24,8 @@ public class FraudEventProducer {
 
     private static final String TOPIC = "fraud-alerts-topic";
 
-    private final KafkaTemplate<String, TransactionEvaluatedEvent> kafkaTemplate;
+    // Matches the KafkaTemplate<String, Object> bean defined in KafkaConsumerConfig
+    private final KafkaTemplate<String, Object> kafkaTemplate;
 
     /**
      * Publishes a transaction evaluation event to Kafka.
@@ -36,7 +37,7 @@ public class FraudEventProducer {
     public void publishEvaluationEvent(Transaction transaction, EvaluationSummary summary) {
         TransactionEvaluatedEvent event = buildEvent(transaction, summary);
 
-        CompletableFuture<SendResult<String, TransactionEvaluatedEvent>> future =
+        CompletableFuture<SendResult<String, Object>> future =
             kafkaTemplate.send(TOPIC, transaction.accountId(), event);
 
         future.whenComplete((result, ex) -> {
