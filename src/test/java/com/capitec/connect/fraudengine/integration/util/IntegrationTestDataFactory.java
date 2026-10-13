@@ -121,14 +121,12 @@ public final class IntegrationTestDataFactory {
      * the initial request and the duplicate.
      */
     public static TransactionRequestBuilder duplicateTransaction() {
-        UUID fixedId = UUID.randomUUID();
-        return validTransaction()
-            .id(fixedId)
-            .amount(new BigDecimal("100.00"));
+        return duplicateTransaction(UUID.randomUUID());
     }
 
     /**
      * Creates a duplicate transaction builder with a specific ID.
+     * Use this when you need to control the exact UUID for duplicate testing.
      */
     public static TransactionRequestBuilder duplicateTransaction(UUID fixedId) {
         return validTransaction()

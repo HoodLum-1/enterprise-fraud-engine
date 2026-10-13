@@ -20,18 +20,21 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ProblemDetail handleValidationException(MethodArgumentNotValidException ex) {
-        log.warn("Validation failed: {}", ex.getMessage());
+        // Collect field errors first so we can log them cleanly
+        Map<String, String> errors = new HashMap<>();
+        for (FieldError error : ex.getBindingResult().getFieldErrors()) {
+            errors.put(error.getField(), error.getDefaultMessage());
+        }
+
+
+        log.warn("Validation failed for request payload: errors={}", errors);
+
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
             HttpStatus.BAD_REQUEST,
             "Request validation failed"
         );
         problemDetail.setTitle("Bad Request");
         problemDetail.setType(URI.create("https://api.capitec.com/errors/bad-request"));
-
-        Map<String, String> errors = new HashMap<>();
-        for (FieldError error : ex.getBindingResult().getFieldErrors()) {
-            errors.put(error.getField(), error.getDefaultMessage());
-        }
         problemDetail.setProperty("invalidParams", errors);
         problemDetail.setProperty("timestamp", Instant.now());
         return problemDetail;

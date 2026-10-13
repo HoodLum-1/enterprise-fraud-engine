@@ -3,6 +3,7 @@ package com.capitec.connect.fraudengine.infrastructure.config;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.NestedConfigurationProperty;
 import org.springframework.context.annotation.Configuration;
 
 import java.math.BigDecimal;
@@ -13,7 +14,10 @@ import java.time.Duration;
 @ConfigurationProperties(prefix = "fraud.engine")
 public class FraudEngineProperties {
 
+    @NestedConfigurationProperty
     private Evaluation evaluation = new Evaluation();
+
+    @NestedConfigurationProperty
     private Rules rules = new Rules();
 
     @Data

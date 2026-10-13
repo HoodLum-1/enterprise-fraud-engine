@@ -12,3 +12,74 @@ spring:
     show-sql: false
   flyway:
     enabled: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.type.mapping: "TransactionEvaluatedEvent:com.capitec.connect.fraudengine.infrastructure.messaging.TransactionEvaluatedEvent"
+        spring.json.trusted.packages: "com.capitec.connect.fraudengine.infrastructure.messaging"
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        transactional.id: fraud-engine-test-producer
+      retries: 3
+      acks: all
+  cache:
+    type: redis
+    redis:
+      time-to-live: 60000
+      cache-null-values: false
+
+fraud:
+  engine:
+    evaluation:
+      history-window: PT24H
+    rules:
+      high-amount:
+        enabled: true
+        threshold: 50000.00
+        risk-score: 40
+        severity: HIGH
+      velocity:
+        enabled: true
+        threshold: 3
+        window: 2m
+        risk-score: 50
+        severity: CRITICAL
+      location-mismatch:
+        enabled: true
+        time-gap-threshold: 10m
+        risk-score: 60
+        severity: CRITICAL
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      fraudEngine:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 5000
+        failureRateThreshold: 50
+  ratelimiter:
+    instances:
+      fraudEngine:
+        limitForPeriod: 1000
+        limitRefreshPeriod: 60s
+        timeoutDuration: 1000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+  endpoint:
+    health:
+      show-details: always

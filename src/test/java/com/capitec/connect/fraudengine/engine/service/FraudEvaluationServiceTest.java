@@ -8,13 +8,14 @@ import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.domain.model.Transaction;
 import com.capitec.connect.fraudengine.engine.FraudEngine;
-import com.capitec.connect.fraudengine.infrastructure.entity.FraudAlertEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.TransactionEntity;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
 import com.capitec.connect.fraudengine.infrastructure.mapper.TransactionMapper;
 import com.capitec.connect.fraudengine.infrastructure.repository.FraudAlertRepository;
 import com.capitec.connect.fraudengine.infrastructure.repository.TransactionRepository;
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
+import com.capitec.connect.fraudengine.infrastructure.messaging.FraudEventProducer;
+
 import com.capitec.connect.fraudengine.util.FraudTestDataFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,6 +48,12 @@ class FraudEvaluationServiceTest {
 
     @Mock
     private FraudEngine fraudEngine;
+
+    @Mock
+    private AccountHistoryCacheService accountHistoryCacheService;
+
+    @Mock
+    private FraudEventProducer fraudEventProducer;
 
     @Spy
     private TransactionMapper transactionMapper = new TransactionMapper();
@@ -95,8 +102,10 @@ class FraudEvaluationServiceTest {
                 .timestamp(Instant.now().minusSeconds(3600))
                 .build();
 
-        when(transactionRepository.findByAccountIdAndTimestampAfterOrderByTimestampDesc(eq("ACC-1001"), any(Instant.class)))
-                .thenReturn(List.of(historyEntity));
+        Transaction historyDomain = transactionMapper.toDomain(historyEntity);
+
+        when(accountHistoryCacheService.getCachedAccountHistory(eq("ACC-1001"), any(Instant.class)))
+                .thenReturn(List.of(historyDomain));
 
         FraudAlert alert = FraudTestDataFactory.fraudAlert()
                 .transactionId(txId)
@@ -136,7 +145,7 @@ class FraudEvaluationServiceTest {
     @Test
     void testEvaluate_SuccessfulEvaluation_WithoutAlerts() {
         when(transactionRepository.existsById(txId)).thenReturn(false);
-        when(transactionRepository.findByAccountIdAndTimestampAfterOrderByTimestampDesc(eq("ACC-1001"), any(Instant.class)))
+        when(accountHistoryCacheService.getCachedAccountHistory(eq("ACC-1001"), any(Instant.class)))
                 .thenReturn(List.of());
 
         EvaluationSummary expectedSummary = FraudTestDataFactory.evaluationSummary(
@@ -163,7 +172,7 @@ class FraudEvaluationServiceTest {
     @Test
     void testEvaluate_UsesConfiguredHistoryWindow() {
         when(transactionRepository.existsById(txId)).thenReturn(false);
-        when(transactionRepository.findByAccountIdAndTimestampAfterOrderByTimestampDesc(eq("ACC-1001"), any(Instant.class)))
+        when(accountHistoryCacheService.getCachedAccountHistory(eq("ACC-1001"), any(Instant.class)))
                 .thenReturn(List.of());
         when(fraudEngine.evaluate(any(Transaction.class), anyList())).thenReturn(
                 FraudTestDataFactory.evaluationSummary(txId, "ACC-1001", 0, Severity.LOW, List.of(), List.of())
@@ -176,7 +185,7 @@ class FraudEvaluationServiceTest {
         Instant after = Instant.now();
 
         ArgumentCaptor<Instant> cutoffCaptor = ArgumentCaptor.forClass(Instant.class);
-        verify(transactionRepository).findByAccountIdAndTimestampAfterOrderByTimestampDesc(eq("ACC-1001"), cutoffCaptor.capture());
+        verify(accountHistoryCacheService).getCachedAccountHistory(eq("ACC-1001"), cutoffCaptor.capture());
 
         Instant cutoff = cutoffCaptor.getValue();
         assertFalse(cutoff.isBefore(before.minus(Duration.ofHours(2))), "cutoff should not be earlier than (start - 2h)");
@@ -185,6 +194,6 @@ class FraudEvaluationServiceTest {
 
     @Test
     void historyWindowDefaultsTo24Hours() {
-        assertEquals(Duration.ofHours(24), new FraudEngineProperties.Evaluation().getHistoryWindow());
+        assertEquals(Duration.ofHours(24), new FraudEngineProperties().getEvaluation().getHistoryWindow());
     }
 }

@@ -3,8 +3,11 @@ package com.capitec.connect.fraudengine.integration;
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.dto.response.EvaluationSummaryResponseDto;
 import com.capitec.connect.fraudengine.domain.model.Severity;
+import com.capitec.connect.fraudengine.domain.model.Transaction;
+import com.capitec.connect.fraudengine.engine.service.AccountHistoryCacheService;
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudAlertEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.TransactionEntity;
+import com.capitec.connect.fraudengine.infrastructure.cache.CacheConfiguration;
 import com.capitec.connect.fraudengine.infrastructure.repository.FraudAlertRepository;
 import com.capitec.connect.fraudengine.infrastructure.repository.TransactionRepository;
 import com.capitec.connect.fraudengine.integration.util.IntegrationTestDataFactory;
@@ -15,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -22,12 +27,15 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
+import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -48,11 +56,23 @@ class FraudEngineIntegrationTest {
         .withUsername("postgres")
         .withPassword("postgres");
 
+    @Container
+    @ServiceConnection
+    static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
+        .withExposedPorts(6379);
+
+    @Container
+    @ServiceConnection
+    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
+
     @DynamicPropertySource
     static void registerDynamicProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.data.redis.host", redis::getHost);
+        registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
+        registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
     }
 
     @Autowired
@@ -64,11 +84,19 @@ class FraudEngineIntegrationTest {
     @Autowired
     private FraudAlertRepository fraudAlertRepository;
 
+    @Autowired
+    private CacheManager cacheManager;
+
+    @Autowired
+    private AccountHistoryCacheService accountHistoryCacheService;
+
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     @BeforeEach
     void setUp() {
+        // Clear cache before each test to avoid stale data between tests
+        cacheManager.getCacheNames().forEach(name -> cacheManager.getCache(name).clear());
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
     }
 
@@ -178,7 +206,7 @@ class FraudEngineIntegrationTest {
     @Test
     void evaluateTransaction_velocityRule_shouldTriggerWhenThresholdExceeded() throws Exception {
         String accountId = "ACC-INT-VELOCITY";
-        Instant baseTime = Instant.now().minusSeconds(120); // 2 minutes ago
+        Instant baseTime = Instant.now().minusSeconds(120);
 
         TransactionRequestDto[] velocitySeries = IntegrationTestDataFactory.velocitySeries(accountId, baseTime, 4, 20);
 
@@ -188,7 +216,6 @@ class FraudEngineIntegrationTest {
                     .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated());
         }
-
 
         Instant finalTimestamp = baseTime.plusSeconds(85);
         TransactionRequestDto finalRequest = IntegrationTestDataFactory.velocityTransaction(accountId, baseTime, 85)
@@ -207,5 +234,51 @@ class FraudEngineIntegrationTest {
         boolean hasVelocityAlert = body.alerts().stream()
             .anyMatch(a -> a.ruleName().equals("TransactionVelocityRule"));
         assertTrue(hasVelocityAlert, "Should have TransactionVelocityRule alert");
+    }
+
+    /**
+     * Exercises the Redis cache round-trip that the evaluate flow relies on:
+     * put on a cache miss, hit (JSON + java.time de/serialisation) on the next read,
+     * and eviction via {@code evictAccountHistoryCache}. A failure here (e.g. a
+     * serializer that cannot write {@link Instant}) surfaces as a circuit-breaker
+     * fallback and silently downgrades rule evaluation.
+     */
+    @Test
+    void accountHistoryCache_shouldSerializeEvictAndReadBackFromRedis() {
+        String accountId = "ACC-INT-CACHE";
+        Instant now = Instant.now();
+        Instant eventTime = now.minusSeconds(300);
+
+        transactionRepository.save(TransactionEntity.builder()
+            .id(UUID.randomUUID())
+            .accountId(accountId)
+            .amount(new BigDecimal("250.00"))
+            .currency("ZAR")
+            .category("GROCERIES")
+            .merchantName("Test Merchant")
+            .location("Johannesburg")
+            .timestamp(eventTime)
+            .build());
+
+        Instant cutoff = now.minus(Duration.ofHours(24));
+        Cache cache = cacheManager.getCache(CacheConfiguration.ACCOUNT_HISTORY_CACHE);
+        String cacheKey = accountId + ':' + (cutoff.toEpochMilli() / 300000);
+
+        // miss -> loads from the database and writes the entry to Redis
+        List<Transaction> onMiss = accountHistoryCacheService.getCachedAccountHistory(accountId, cutoff);
+        assertEquals(1, onMiss.size());
+        assertEquals(accountId, onMiss.getFirst().accountId());
+        assertNotNull(cache.get(cacheKey), "entry should be cached after a miss");
+
+        // hit -> value must survive the JSON round-trip (Instant included)
+        List<Transaction> onHit = accountHistoryCacheService.getCachedAccountHistory(accountId, cutoff);
+        assertEquals(1, onHit.size());
+        assertEquals(eventTime, onHit.getFirst().timestamp(), "Instant must round-trip through Redis JSON");
+        assertEquals(onMiss.getFirst().amount(), onHit.getFirst().amount());
+
+        // eviction -> next read goes back to the database
+        accountHistoryCacheService.evictAccountHistoryCache(accountId, cutoff);
+        assertNull(cache.get(cacheKey), "entry should be evicted");
+        assertEquals(1, accountHistoryCacheService.getCachedAccountHistory(accountId, cutoff).size());
     }
 }
