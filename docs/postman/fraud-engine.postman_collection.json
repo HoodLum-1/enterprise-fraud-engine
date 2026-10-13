@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "a9b8c7d6-e5f4-4321-b123-9876543210ab",
 		"name": "Fraud Engine API Collection",
-		"description": "Postman collection for testing Fraud Engine transaction evaluation, alert management, and Actuator observability endpoints.",
+		"description": "Postman collection for testing transaction evaluation, fraud alerts, asynchronous fraud case management, and Actuator observability. Fraud case creation is asynchronous; allow the Kafka consumer to process the evaluation event before looking up its case.",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"variable": [
@@ -23,6 +23,11 @@
 		},
 		{
 			"key": "lastAlertId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "lastHighAmountTxId",
 			"value": "",
 			"type": "string"
 		}
@@ -52,7 +57,7 @@
 							"",
 							"const jsonData = pm.response.json();",
 							"pm.test('Clean transaction has 0 risk score and LOW severity', function () {",
-							"    pm.expect(jsonData.cumulativeRiskScore).to.eql(0);",
+							"    pm.expect(jsonData.totalRiskScore).to.eql(0);",
 							"    pm.expect(jsonData.overallSeverity).to.eql('LOW');",
 							"    pm.expect(jsonData.alerts).to.be.an('array').that.is.empty;",
 							"});",
@@ -116,7 +121,7 @@
 							"",
 							"const jsonData = pm.response.json();",
 							"pm.test('Transaction triggers HighAmountRule', function () {",
-							"    pm.expect(jsonData.cumulativeRiskScore).to.be.at.least(40);",
+							"    pm.expect(jsonData.totalRiskScore).to.be.at.least(40);",
 							"    pm.expect(jsonData.overallSeverity).to.eql('HIGH');",
 							"    pm.expect(jsonData.alerts).to.be.an('array').that.is.not.empty;",
 							"    pm.expect(jsonData.alerts[0].ruleName).to.eql('HighAmountRule');",
@@ -307,7 +312,131 @@
 			"response": []
 		},
 		{
-			"name": "6. Actuator Health Endpoint",
+			"name": "6. List Fraud Cases",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/fraud-cases",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"fraud-cases"
+					]
+				}
+			},
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200 OK', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test('Response is an array of fraud cases', function () {",
+							"    pm.expect(pm.response.json()).to.be.an('array');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"response": []
+		},
+		{
+			"name": "7. Get Fraud Case by Transaction",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"description": "Fraud cases are created asynchronously after Kafka consumes the evaluation event. If this returns 404 immediately after evaluation, retry after the consumer has processed the event.",
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/fraud-cases/transaction/{{lastHighAmountTxId}}",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"fraud-cases",
+						"transaction",
+						"{{lastHighAmountTxId}}"
+					]
+				}
+			},
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200 OK', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"const fraudCase = pm.response.json();",
+							"pm.test('Case is awaiting review', function () {",
+							"    pm.expect(fraudCase.transactionId).to.eql(pm.collectionVariables.get('lastHighAmountTxId'));",
+							"    pm.expect(fraudCase.status).to.eql('PENDING_REVIEW');",
+							"    pm.expect(fraudCase).to.have.property('overallSeverity');",
+							"    pm.expect(fraudCase).to.have.property('totalRiskScore');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"response": []
+		},
+		{
+			"name": "8. Update Fraud Case Status",
+			"request": {
+				"method": "PATCH",
+				"header": [],
+				"description": "Updates the high-amount transaction's case after it has been created by the Kafka consumer.",
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/fraud-cases/{{lastHighAmountTxId}}/status?status=CONFIRMED_FRAUD",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"fraud-cases",
+						"{{lastHighAmountTxId}}",
+						"status"
+					],
+					"query": [
+						{
+							"key": "status",
+							"value": "CONFIRMED_FRAUD"
+						}
+					]
+				}
+			},
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200 OK', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"pm.test('Case status was updated', function () {",
+							"    pm.expect(pm.response.json().status).to.eql('CONFIRMED_FRAUD');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"response": []
+		},
+		{
+			"name": "9. Actuator Health Endpoint",
 			"event": [
 				{
 					"listen": "test",
@@ -343,7 +472,7 @@
 			"response": []
 		},
 		{
-			"name": "7. Actuator Prometheus Metrics Endpoint",
+			"name": "10. Actuator Prometheus Metrics Endpoint",
 			"event": [
 				{
 					"listen": "test",

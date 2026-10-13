@@ -147,7 +147,53 @@ echo "✅ Account fraud alerts retrieved successfully."
 
 echo ""
 echo "------------------------------------------------------------"
-echo "6. Checking Actuator Prometheus Metrics (Expect HTTP 200 OK)..."
+echo "6. Waiting for fraud case to be created by Kafka consumer..."
+echo "------------------------------------------------------------"
+CASE_URL="$BASE_URL/api/v1/fraud-cases/transaction/$HIGH_AMOUNT_TX_ID"
+HTTP_CODE=404
+for attempt in $(seq 1 15); do
+    HTTP_CODE=$(curl -s -o /tmp/fraud_case_response.json -w "%{http_code}" "$CASE_URL")
+    if [ "$HTTP_CODE" -eq 200 ]; then
+        break
+    fi
+    if [ "$HTTP_CODE" -ne 404 ]; then
+        echo "❌ Fraud case lookup failed! Expected 200 or 404 while waiting, got $HTTP_CODE"
+        cat /tmp/fraud_case_response.json
+        exit 1
+    fi
+    sleep 1
+done
+
+echo "Response code: $HTTP_CODE"
+cat /tmp/fraud_case_response.json
+echo ""
+
+if [ "$HTTP_CODE" -ne 200 ]; then
+    echo "❌ Fraud case was not created within 15 seconds."
+    exit 1
+fi
+echo "✅ Fraud case created and retrieved successfully."
+
+echo ""
+echo "------------------------------------------------------------"
+echo "7. Updating Fraud Case Status (Expect HTTP 200 OK)..."
+echo "------------------------------------------------------------"
+HTTP_CODE=$(curl -s -o /tmp/fraud_case_update_response.json -w "%{http_code}" -X PATCH \
+  "$BASE_URL/api/v1/fraud-cases/$HIGH_AMOUNT_TX_ID/status?status=CONFIRMED_FRAUD")
+
+echo "Response code: $HTTP_CODE"
+cat /tmp/fraud_case_update_response.json
+echo ""
+
+if [ "$HTTP_CODE" -ne 200 ]; then
+    echo "❌ Fraud case status update failed! Expected 200, got $HTTP_CODE"
+    exit 1
+fi
+echo "✅ Fraud case status updated successfully."
+
+echo ""
+echo "------------------------------------------------------------"
+echo "8. Checking Actuator Prometheus Metrics (Expect HTTP 200 OK)..."
 echo "------------------------------------------------------------"
 HTTP_CODE=$(curl -s -o /tmp/metrics_response.txt -w "%{http_code}" -X GET "$BASE_URL/actuator/prometheus")
 

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Fraud Engine API
-  description: Enterprise real-time transaction fraud evaluation and alert retrieval service.
+  description: Enterprise real-time transaction fraud evaluation, fraud alert retrieval, and fraud case management service.
   version: 1.0.0
   contact:
     name: Capitec Connect Team
@@ -13,7 +13,7 @@ paths:
   /api/v1/transactions/evaluate:
     post:
       summary: Evaluate transaction for fraud
-      description: Ingests a new transaction, evaluates it against active fraud rules (high amount, velocity, location anomaly), persists evaluation results and alerts, and returns the evaluation summary.
+      description: Ingests a new transaction, evaluates it against active fraud rules (high amount, velocity, location anomaly), persists evaluation results and alerts, and publishes an event. A fraud case is created asynchronously by the Kafka consumer and may not be immediately available.
       operationId: evaluateTransaction
       requestBody:
         required: true
@@ -40,8 +40,9 @@ paths:
               example:
                 transactionId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
                 accountId: "ACC-998877"
-                cumulativeRiskScore: 40
+                totalRiskScore: 40
                 overallSeverity: "HIGH"
+                isFraudulent: true
                 alerts:
                   - id: "e2b6c935-d227-44f2-95f3-52467d5d2e38"
                     transactionId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
@@ -51,7 +52,6 @@ paths:
                     severity: "HIGH"
                     reason: "Transaction amount 55000.00 exceeds configured threshold of 50000.00"
                     flaggedAt: "2026-10-10T20:00:01Z"
-                evaluatedAt: "2026-10-10T20:00:01Z"
         '400':
           description: Bad Request - Validation error or malformed payload (RFC 7807 Problem Detail).
           content:
@@ -136,6 +136,82 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProblemDetail'
 
+  /api/v1/fraud-cases:
+    get:
+      summary: Retrieve all fraud cases
+      description: Returns all fraud cases created by the asynchronous Kafka event consumer.
+      operationId: getAllFraudCases
+      responses:
+        '200':
+          description: All fraud cases.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FraudCase'
+
+  /api/v1/fraud-cases/transaction/{transactionId}:
+    get:
+      summary: Retrieve a fraud case by transaction ID
+      description: Returns the case associated with a transaction UUID. A case is created asynchronously after its evaluation event is consumed.
+      operationId: getFraudCaseByTransactionId
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          description: Transaction UUID
+          schema:
+            type: string
+            format: uuid
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+      responses:
+        '200':
+          description: Fraud case found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudCase'
+        '404':
+          description: No fraud case exists for this transaction ID.
+
+  /api/v1/fraud-cases/{transactionId}/status:
+    patch:
+      summary: Update fraud case status
+      description: Updates the review status of an existing fraud case.
+      operationId: updateFraudCaseStatus
+      parameters:
+        - name: transactionId
+          in: path
+          required: true
+          description: Transaction UUID associated with the fraud case
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: true
+          description: New fraud case status
+          schema:
+            type: string
+            enum:
+              - PENDING_REVIEW
+              - CONFIRMED_FRAUD
+              - FALSE_POSITIVE
+              - RESOLVED
+          example: CONFIRMED_FRAUD
+      responses:
+        '200':
+          description: Status updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudCase'
+        '400':
+          description: Unsupported status value.
+        '404':
+          description: No fraud case exists for this transaction ID.
+
 components:
   schemas:
     TransactionRequestDto:
@@ -196,10 +272,10 @@ components:
       required:
         - transactionId
         - accountId
-        - cumulativeRiskScore
+        - totalRiskScore
         - overallSeverity
+        - isFraudulent
         - alerts
-        - evaluatedAt
       properties:
         transactionId:
           type: string
@@ -208,20 +284,63 @@ components:
         accountId:
           type: string
           example: "ACC-998877"
-        cumulativeRiskScore:
+        totalRiskScore:
           type: integer
           description: Sum of risk scores from all triggered rules
           example: 40
         overallSeverity:
           $ref: '#/components/schemas/Severity'
+        isFraudulent:
+          type: boolean
+          description: Whether any fraud rule was triggered
+          example: true
         alerts:
           type: array
           items:
             $ref: '#/components/schemas/FraudAlertResponseDto'
-        evaluatedAt:
+
+    FraudCase:
+      type: object
+      required:
+        - id
+        - transactionId
+        - accountId
+        - totalRiskScore
+        - overallSeverity
+        - status
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique fraud case identifier
+        transactionId:
+          type: string
+          format: uuid
+          description: Unique transaction associated with this case
+        accountId:
+          type: string
+          maxLength: 64
+        totalRiskScore:
+          type: integer
+          minimum: 0
+        overallSeverity:
+          $ref: '#/components/schemas/Severity'
+        status:
+          type: string
+          maxLength: 30
+          enum:
+            - PENDING_REVIEW
+            - CONFIRMED_FRAUD
+            - FALSE_POSITIVE
+            - RESOLVED
+        createdAt:
           type: string
           format: date-time
-          example: "2026-10-10T20:00:01Z"
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
 
     FraudAlertResponseDto:
       type: object
