@@ -64,5 +64,19 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
 
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2.5
+    container_name: fraud_keycloak
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://localhost:8180
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - '8180:8080'
+    volumes:
+      - ./config/keycloak:/opt/keycloak/data/import:ro
+
 volumes:
   postgres_data:

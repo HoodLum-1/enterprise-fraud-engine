@@ -97,6 +97,8 @@ paths:
       summary: Retrieve fraud alerts for an account
       description: Fetches all historical fraud alerts triggered for a given account ID, ordered by flagged timestamp descending.
       operationId: getFraudAlertsByAccount
+      security:
+        - BearerAuth: []
       parameters:
         - name: accountId
           in: path
@@ -141,6 +143,8 @@ paths:
       summary: Retrieve all fraud cases
       description: Returns all fraud cases created by the asynchronous Kafka event consumer.
       operationId: getAllFraudCases
+      security:
+        - BearerAuth: []
       responses:
         '200':
           description: All fraud cases.
@@ -156,6 +160,8 @@ paths:
       summary: Retrieve a fraud case by transaction ID
       description: Returns the case associated with a transaction UUID. A case is created asynchronously after its evaluation event is consumed.
       operationId: getFraudCaseByTransactionId
+      security:
+        - BearerAuth: []
       parameters:
         - name: transactionId
           in: path
@@ -180,6 +186,8 @@ paths:
       summary: Update fraud case status
       description: Updates the review status of an existing fraud case.
       operationId: updateFraudCaseStatus
+      security:
+        - BearerAuth: []
       parameters:
         - name: transactionId
           in: path
@@ -213,6 +221,11 @@ paths:
           description: No fraud case exists for this transaction ID.
 
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
     TransactionRequestDto:
       type: object

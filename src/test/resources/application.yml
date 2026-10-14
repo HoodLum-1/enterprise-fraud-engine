@@ -29,6 +29,12 @@ spring:
         transactional.id: fraud-engine-test-producer
       retries: 3
       acks: all
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8180/realms/fraud-engine
+          jwk-set-uri: http://localhost:8180/realms/fraud-engine/protocol/openid-connect/certs
   cache:
     type: redis
     redis:

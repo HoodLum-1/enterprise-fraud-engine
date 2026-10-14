@@ -1,0 +1,52 @@
+{
+  "realm": "fraud-engine",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "fraud-engine-client",
+      "name": "Fraud Engine Local Test Client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "fullScopeAllowed": true
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "FRAUD_ANALYST"
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "fraud-analyst",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "fraud-analyst-dev",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "FRAUD_ANALYST"
+      ]
+    },
+    {
+      "username": "fraud-viewer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "fraud-viewer-dev",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

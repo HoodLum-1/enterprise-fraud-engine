@@ -36,6 +36,11 @@ spring:
         transactional.id: fraud-engine-producer
       retries: 3
       acks: all
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI:http://localhost:8180/realms/fraud-engine}
   jpa:
     hibernate:
       ddl-auto: validate
@@ -81,6 +86,10 @@ fraud:
 
 server:
   port: 8080
+
+#Disabled security for testing purposes, Keycloak needs to be configured when container is running
+security:
+  enabled: false
 
 management:
   endpoints:
