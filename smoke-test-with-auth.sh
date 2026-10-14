@@ -3,6 +3,13 @@ set -e
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8180}"
+KEYCLOAK_USERNAME="${KEYCLOAK_USERNAME:-INSERT_CREDS_HERE<>}"
+KEYCLOAK_PASSWORD="${KEYCLOAK_PASSWORD:-INSERT_CREDS_HERE<>}"
+
+if [ "$KEYCLOAK_USERNAME" = "INSERT_CREDS_HERE<>" ] || [ "$KEYCLOAK_PASSWORD" = "INSERT_CREDS_HERE<>" ]; then
+    echo "Set KEYCLOAK_USERNAME and KEYCLOAK_PASSWORD to credentials for a configured Keycloak analyst account."
+    exit 1
+fi
 
 echo "============================================================"
 echo " Starting Fraud Engine Smoke Tests against: $BASE_URL"
@@ -29,8 +36,8 @@ for attempt in $(seq 1 20); do
       -H 'Content-Type: application/x-www-form-urlencoded' \
       -d 'client_id=fraud-engine-client' \
       -d 'grant_type=password' \
-      -d 'username=fraud-analyst' \
-      -d 'password=admin123' 2>/dev/null || true)
+      --data-urlencode "username=$KEYCLOAK_USERNAME" \
+      --data-urlencode "password=$KEYCLOAK_PASSWORD" 2>/dev/null || true)
 
     TOKEN=$(echo "$TOKEN_RESPONSE" | python3 -c 'import json, sys;
 try:
@@ -52,6 +59,19 @@ if [ -z "$TOKEN" ] || [ "$TOKEN" = "None" ]; then
     exit 1
 fi
 echo "✅ Successfully authenticated and retrieved Bearer token."
+
+echo ""
+echo "------------------------------------------------------------"
+echo "Checking that application authentication is enabled..."
+echo "------------------------------------------------------------"
+SECURITY_CHECK_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+  "$BASE_URL/api/v1/fraud-cases")
+if [ "$SECURITY_CHECK_CODE" -ne 401 ]; then
+    echo "❌ Authenticated smoke tests require security.enabled=true (expected unauthenticated HTTP 401, got $SECURITY_CHECK_CODE)."
+    echo "   Configure Keycloak and restart the application with SECURITY_ENABLED=true."
+    exit 1
+fi
+echo "✅ Unauthenticated protected endpoint is denied; security is enabled."
 
 ACCOUNT_ID="acc-smoke-$(date +%s)"
 CLEAN_TX_ID=$(generate_uuid)

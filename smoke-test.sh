@@ -25,6 +25,19 @@ TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 echo ""
 echo "------------------------------------------------------------"
+echo "0. Checking that application authentication is disabled..."
+echo "------------------------------------------------------------"
+SECURITY_CHECK_CODE=$(curl -s -o /tmp/security_mode_response.json -w "%{http_code}" \
+  "$BASE_URL/api/v1/fraud-cases")
+if [ "$SECURITY_CHECK_CODE" -ne 200 ]; then
+    echo "❌ This smoke test requires security.enabled=false (expected unauthenticated HTTP 200, got $SECURITY_CHECK_CODE)."
+    echo "   Enable security and use ./smoke-test-with-auth.sh instead."
+    exit 1
+fi
+echo "✅ Unauthenticated protected endpoint is accessible; security is disabled."
+
+echo ""
+echo "------------------------------------------------------------"
 echo "1. Testing Clean Low-Risk Transaction (Expect HTTP 201)..."
 echo "------------------------------------------------------------"
 HTTP_CODE=$(curl -s -o /tmp/clean_tx_response.json -w "%{http_code}" -X POST "$BASE_URL/api/v1/transactions/evaluate" \

@@ -122,13 +122,30 @@ docker-compose up -d postgres redis kafka
 
 ## 🧪 Testing & Verification
 
-### 1. Automated Smoke Test Script
+### 1. Unauthenticated Smoke Test
+
+Use `smoke-test.sh` only when application security is disabled (`security.enabled=false`, the default assessment setup):
+
 ```bash
 ./smoke-test.sh
 ```
-Verifies: low-risk evaluation, high-amount rule triggering, idempotency (409), validation (400), alert retrieval, asynchronous fraud-case lookup and status update, and Prometheus metrics.
+The script verifies that an unauthenticated request can access a protected endpoint before running its checks. It exits with guidance if security is enabled. Checks include low-risk evaluation, high-amount rule triggering, idempotency (409), validation (400), alert retrieval, asynchronous fraud-case lookup and status update, and Prometheus metrics.
 
-### 2. Load Test
+### 2. Authenticated Smoke Test
+
+Use `smoke-test-with-auth.sh` only after Keycloak has been configured and the application restarted with `SECURITY_ENABLED=true`. The script checks that an unauthenticated request is rejected, obtains a token, then tests the protected API routes.
+
+Set the analyst username and password for your configured Keycloak realm in the environment. The script contains only `INSERT_CREDS_HERE<>` placeholders and exits unless you provide credentials:
+
+```bash
+KEYCLOAK_USERNAME='INSERT_CREDS_HERE<>' \
+KEYCLOAK_PASSWORD='INSERT_CREDS_HERE<>' \
+./smoke-test-with-auth.sh
+```
+
+Replace both placeholder values with credentials for an account with the `FRAUD_ANALYST` realm role. Do not commit real credentials. `BASE_URL` and `KEYCLOAK_URL` can be set to target non-default addresses.
+
+### 3. Load Test
 
 Start the application and its backing services first, then run:
 
@@ -147,7 +164,7 @@ BASE_URL=http://localhost:8081 ./load-test.sh
 
 Available settings: `TOTAL_REQUESTS`, `CONCURRENCY`, `BASE_URL`, and `API_ENDPOINT`. Use moderate settings for local runs and monitor application, database, Redis, and Kafka health; the script creates persistent transactions and is intended for development/testing, not production benchmarking.
 
-### 3. Postman Collection
+### 4. Postman Collection
 Import `docs/postman/fraud-engine.postman_collection.json` into Postman. The collection includes:
 - Pre-configured environment variables
 - Auto-generated UUIDs and timestamps via pre-request scripts
@@ -179,22 +196,9 @@ For this assessment, authentication is **disabled by default** in `src/main/reso
 SECURITY_ENABLED=true ./run.sh
 ```
 
-With security enabled, fraud-case routes require a Keycloak bearer token with the `FRAUD_ANALYST` realm role, fraud-alert routes require a valid JWT, and transaction evaluation, health, Prometheus, and Swagger/OpenAPI remain public. Missing or invalid authentication returns `401`; an authenticated caller without the required role receives `403`. Ensure the configured JWT issuer matches `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` and is reachable by the application. The local realm and its development accounts are for testing only; replace them before deployment.
+With security enabled, fraud-case routes require a Keycloak bearer token with the `FRAUD_ANALYST` realm role, fraud-alert routes require a valid JWT, and transaction evaluation, health, Prometheus, and Swagger/OpenAPI remain public. Missing or invalid authentication returns `401`; an authenticated caller without the required role receives `403`. Ensure the configured JWT issuer matches `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` and is reachable by the application. The local realm and its development accounts are for testing only; replace them before deployment. Use the authenticated smoke-test instructions above to provide your configured analyst credentials without storing them in the repository.
 
-`docker compose up -d` starts Keycloak on port `8180`. After enabling security, request an analyst token for local development with:
-
-```bash
-curl -s -X POST http://localhost:8180/realms/fraud-engine/protocol/openid-connect/token \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  -d 'client_id=fraud-engine-client' \
-  -d 'grant_type=password' \
-  -d 'username=fraud-analyst' \
-  -d 'password=fraud-analyst-dev'
-```
-
-Use the returned `access_token` as `Authorization: Bearer <token>`. The realm includes `fraud-viewer` (`fraud-viewer-dev`) to exercise the forbidden response. These development credentials and the password grant are for local testing only; do not use them in deployed environments. Override the issuer with `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` when connecting to another identity provider.
-
-### 4. Unit & Integration Tests (Testcontainers)
+### 5. Unit & Integration Tests (Testcontainers)
 ```bash
 # All unit and integration tests
 ./mvnw test
@@ -205,7 +209,7 @@ make test
 - **Unit tests**: H2 in-memory DB, no Docker required
 - **Integration tests**: Testcontainers spin up real PostgreSQL 16, Redis 7, Kafka 7.5
 
-### 5. Makefile Convenience Targets
+### 6. Makefile Convenience Targets
 ```bash
 make help      # Show all targets
 make up        # Start infrastructure
