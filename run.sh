@@ -69,7 +69,7 @@ check_prerequisites() {
 
 # Start infrastructure
 start_infrastructure() {
-    log_info "Starting infrastructure services..."
+    log_info "Starting all infrastructure services (Postgres, Redis, Kafka, Keycloak)..."
     docker compose -f "$COMPOSE_FILE" up -d
 
     log_info "Waiting for PostgreSQL to be healthy..."
@@ -85,7 +85,6 @@ start_infrastructure() {
 
     if [[ $retries -eq $MAX_HEALTH_RETRIES ]]; then
         log_error "PostgreSQL health check timed out"
-        docker compose -f "$COMPOSE_FILE" logs postgres
         exit 1
     fi
 
@@ -100,11 +99,11 @@ start_infrastructure() {
         sleep $HEALTH_RETRY_INTERVAL
     done
 
-    log_info "Waiting for Kafka to be ready..."
+    log_info "Waiting for Keycloak to be ready..."
     retries=0
     while [[ $retries -lt $MAX_HEALTH_RETRIES ]]; do
-        if docker-compose -f "$COMPOSE_FILE" exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list &> /dev/null; then
-            log_success "Kafka is ready"
+        if curl -sf "http://localhost:8180/health/ready" &> /dev/null; then
+            log_success "Keycloak is ready"
             break
         fi
         retries=$((retries + 1))
@@ -136,7 +135,8 @@ start_application() {
     log_info "Health endpoint: $HEALTH_ENDPOINT"
 
     # Run in background so we can monitor health
-    java -jar "$JAR_FILE" &
+    SPRING_DATASOURCE_URL="${SPRING_DATASOURCE_URL:-jdbc:postgresql://localhost:5432/fraud_db}" \
+        java -jar "$JAR_FILE" &
     APP_PID=$!
 
     # Trap signals to clean up
@@ -149,9 +149,7 @@ start_application() {
         if curl -sf "$HEALTH_ENDPOINT" &> /dev/null; then
             log_success "Application is healthy!"
             log_info "Swagger UI: http://localhost:8080/swagger-ui.html"
-            log_info "OpenAPI Spec: http://localhost:8080/v3/api-docs"
-            log_info "Actuator Health: http://localhost:8080/actuator/health"
-            log_info "Prometheus Metrics: http://localhost:8080/actuator/prometheus"
+            log_info "Keycloak Realm: http://localhost:8180/realms/fraud-engine"
             log_info "Fraud Cases API: http://localhost:8080/api/v1/fraud-cases"
             log_info "Kafka UI: http://localhost:8085"
             break
@@ -173,7 +171,7 @@ start_application() {
 # Main execution
 main() {
     echo "=========================================="
-    echo "  Fraud Engine - Production Startup"
+    echo "  Fraud Engine - Full Stack Startup"
     echo "=========================================="
     echo ""
 

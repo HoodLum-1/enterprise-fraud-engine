@@ -29,7 +29,30 @@ To build, run, and test this project locally, ensure you have the following inst
 
 ## 🚀 Starting the Application
 
-### Option A: Quick Start with `run.sh` (Recommended)
+### Option A: Run the Dockerfile-built application container (Recommended)
+
+Start the supporting services, build the application image from the repository's multi-stage `Dockerfile`, then run it on the same Compose network:
+
+```bash
+# Start dependencies (Compose project name keeps the network name predictable)
+docker compose -p fraud-engine up -d postgres redis zookeeper kafka kafka-ui keycloak
+
+# Build the application image using the Dockerfile
+docker build -t fraud-engine .
+
+# Run the app in Docker; service names resolve on the Compose network
+docker run --rm --name fraud-engine \
+  --network fraud-engine_default \
+  -p 8080:8080 \
+  -e SPRING_DATA_REDIS_HOST=redis \
+  -e SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092 \
+  fraud-engine
+```
+
+The PostgreSQL URL remains the application default, `jdbc:postgresql://postgres:5432/fraud_db`; Docker resolves `postgres` on the shared network. The Redis and Kafka environment variables point the app container to their Compose service names. The container uses the same security setting as the packaged application (`security.enabled=false` by default); see [Authentication](#authentication) before enabling security.
+
+### Option B: Quick Start with `run.sh`
+
 The `run.sh` script boots all infrastructure, builds the app, and starts the service with health checks:
 
 ```bash
@@ -43,7 +66,9 @@ This will:
 4. Start the application and verify `/actuator/health`
 5. Print all available endpoints
 
-### Option B: Using Makefile Targets
+The script also starts Keycloak. Application authentication is **disabled by default** (`security.enabled=false`) until Keycloak has been configured for this environment. Configure and verify the `fraud-engine` realm, client, and roles in the Keycloak Admin Console at `http://localhost:8180/admin`, then restart the application with `SECURITY_ENABLED=true` to enforce JWT authentication. Until then, do not treat protected API routes as access-controlled.
+
+### Option C: Using Makefile Targets
 ```bash
 # Start all infrastructure (PostgreSQL, Redis, Kafka, Kafka UI)
 make up
@@ -58,7 +83,7 @@ make run
 make build && make run
 ```
 
-### Option C: Manual Docker Compose
+### Option D: Manual Docker Compose
 ```bash
 # Start full stack
 docker-compose up -d
@@ -67,7 +92,7 @@ docker-compose up -d
 docker-compose up -d postgres redis kafka
 ```
 
-### Option D: Local Development with Maven
+### Option E: Local Development with Maven
 ```bash
 # Start backing services only
 docker-compose up -d postgres redis kafka
@@ -88,6 +113,7 @@ docker-compose up -d postgres redis kafka
 | **Actuator Health** | `http://localhost:8080/actuator/health` | Health checks |
 | **Prometheus Metrics** | `http://localhost:8080/actuator/prometheus` | Metrics endpoint |
 | **Fraud Cases** | `http://localhost:8080/api/v1/fraud-cases` | List, look up, and update fraud-case review status |
+| **Keycloak** | `http://localhost:8180` | Local OAuth2 issuer (`fraud-engine` realm) |
 | **Kafka UI** | `http://localhost:8085` | Kafka topic browser |
 | **PostgreSQL** | `localhost:5432` | Database (user: postgres, pass: postgres) |
 | **Redis** | `localhost:6379` | Cache |
@@ -102,7 +128,26 @@ docker-compose up -d postgres redis kafka
 ```
 Verifies: low-risk evaluation, high-amount rule triggering, idempotency (409), validation (400), alert retrieval, asynchronous fraud-case lookup and status update, and Prometheus metrics.
 
-### 2. Postman Collection
+### 2. Load Test
+
+Start the application and its backing services first, then run:
+
+```bash
+./load-test.sh
+```
+
+The script sends 200 unique transaction-evaluation requests with up to 20 requests in flight, then reports duration, throughput, status-code counts, and the `201 Created` success rate. It requires `curl`, `bc`, and `python3` (or `uuidgen` for UUID generation).
+
+Override the request count, concurrency, or target URL with environment variables:
+
+```bash
+TOTAL_REQUESTS=500 CONCURRENCY=50 ./load-test.sh
+BASE_URL=http://localhost:8081 ./load-test.sh
+```
+
+Available settings: `TOTAL_REQUESTS`, `CONCURRENCY`, `BASE_URL`, and `API_ENDPOINT`. Use moderate settings for local runs and monitor application, database, Redis, and Kafka health; the script creates persistent transactions and is intended for development/testing, not production benchmarking.
+
+### 3. Postman Collection
 Import `docs/postman/fraud-engine.postman_collection.json` into Postman. The collection includes:
 - Pre-configured environment variables
 - Auto-generated UUIDs and timestamps via pre-request scripts
@@ -121,7 +166,35 @@ Every evaluated transaction publishes a `TransactionEvaluatedEvent` to Kafka. Th
 
 Case responses include the case and transaction IDs, account ID, total risk score, overall severity, status, and creation/update timestamps. Critical events (severity `CRITICAL` or risk score at least 80) also result in an `ACCOUNT_FREEZE` command being published to Kafka.
 
-### 3. Unit & Integration Tests (Testcontainers)
+### Authentication
+
+For this assessment, authentication is **disabled by default** in `src/main/resources/application.yml` (`security.enabled: false`). Keycloak is started by Docker Compose, but the application is left open until Keycloak has been configured through its Admin Console. In this mode, Spring Security's URL and method-level authorization checks are both disabled; do not expose the service as a secured API while this setting is off.
+
+1. Start the stack with `./run.sh` or `docker compose up -d`.
+2. Open the Keycloak Admin Console at `http://localhost:8180/admin` (local bootstrap credentials are `admin` / `admin`).
+3. Configure or verify the `fraud-engine` realm, the resource-server client, and the `FRAUD_ANALYST` role. Compose imports the realm definition from `config/keycloak/fraud-engine-realm.json` as a starting point.
+4. Restart the application with `SECURITY_ENABLED=true` in its environment. For `run.sh`, for example:
+
+```bash
+SECURITY_ENABLED=true ./run.sh
+```
+
+With security enabled, fraud-case routes require a Keycloak bearer token with the `FRAUD_ANALYST` realm role, fraud-alert routes require a valid JWT, and transaction evaluation, health, Prometheus, and Swagger/OpenAPI remain public. Missing or invalid authentication returns `401`; an authenticated caller without the required role receives `403`. Ensure the configured JWT issuer matches `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` and is reachable by the application. The local realm and its development accounts are for testing only; replace them before deployment.
+
+`docker compose up -d` starts Keycloak on port `8180`. After enabling security, request an analyst token for local development with:
+
+```bash
+curl -s -X POST http://localhost:8180/realms/fraud-engine/protocol/openid-connect/token \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'client_id=fraud-engine-client' \
+  -d 'grant_type=password' \
+  -d 'username=fraud-analyst' \
+  -d 'password=fraud-analyst-dev'
+```
+
+Use the returned `access_token` as `Authorization: Bearer <token>`. The realm includes `fraud-viewer` (`fraud-viewer-dev`) to exercise the forbidden response. These development credentials and the password grant are for local testing only; do not use them in deployed environments. Override the issuer with `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` when connecting to another identity provider.
+
+### 4. Unit & Integration Tests (Testcontainers)
 ```bash
 # All unit and integration tests
 ./mvnw test
@@ -132,7 +205,7 @@ make test
 - **Unit tests**: H2 in-memory DB, no Docker required
 - **Integration tests**: Testcontainers spin up real PostgreSQL 16, Redis 7, Kafka 7.5
 
-### 4. Makefile Convenience Targets
+### 5. Makefile Convenience Targets
 ```bash
 make help      # Show all targets
 make up        # Start infrastructure

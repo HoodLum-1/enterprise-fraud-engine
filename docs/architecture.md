@@ -339,6 +339,12 @@ When breaker is OPEN or rate limiter rejects:
 - **Input validation**: Jakarta Bean Validation on all DTOs — RFC 7807 error responses.
 - **Rate limiting**: Resilience4j at service layer + reverse proxy (nginx/Envoy) recommended at edge.
 
+#### Local Keycloak setup and security mode
+
+The application configuration sets `security.enabled=false` by default for the assessment environment. Docker Compose starts Keycloak and imports the starter realm from `config/keycloak/fraud-engine-realm.json`, but the realm, client, and role configuration must be reviewed and completed in the Keycloak Admin Console (`http://localhost:8180/admin`) before enabling application authentication. The local bootstrap account is `admin` / `admin`; these credentials must not be used outside local development.
+
+When security is disabled, the application uses a permit-all filter chain and does not enable method-level authorization, so annotations such as `@PreAuthorize` do not protect routes. This is an intentional setup mode, not a production security posture. After configuring Keycloak, set `SECURITY_ENABLED=true` in the application environment and restart it. Security-enabled mode enforces JWT authentication, requires the `FRAUD_ANALYST` role for fraud-case operations, and keeps the documented public endpoints public. The configured issuer (`SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI`) must match the token issuer and be reachable from the application.
+
 ---
 
 ### 10. Testing Strategy
