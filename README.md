@@ -49,6 +49,12 @@ docker run --rm --name fraud-engine \
   fraud-engine
 ```
 
+> 💡 **Troubleshooting Network Errors (`UnknownHostException: postgres`)**
+>
+> Depending on your operating system and Docker version, Docker Compose may prefix network names differently (e.g., `fraud-engine_fraud-engine_default` instead of `fraud-engine_default`).
+>
+> If you encounter a database connection error during startup, run `docker network ls` to check your exact network name, and update the `--network` flag in the `docker run` command above to match it.
+
 The PostgreSQL URL remains the application default, `jdbc:postgresql://postgres:5432/fraud_db`; Docker resolves `postgres` on the shared network. The Redis and Kafka environment variables point the app container to their Compose service names. The container uses the same security setting as the packaged application (`security.enabled=false` by default); see [Authentication](#authentication) before enabling security.
 
 ### Option B: Quick Start with `run.sh`
