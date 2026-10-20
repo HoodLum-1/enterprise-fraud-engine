@@ -10,5 +10,6 @@ import java.util.UUID;
 
 @Repository
 public interface TransactionRepository extends JpaRepository<TransactionEntity, UUID> {
-    List<TransactionEntity> findByAccountIdAndTimestampAfterOrderByTimestampDesc(String accountId, Instant timestamp);
+    List<TransactionEntity> findByAccountIdAndTimestampBetweenOrderByTimestampDesc(
+        String accountId, Instant fromInclusive, Instant toInclusive);
 }

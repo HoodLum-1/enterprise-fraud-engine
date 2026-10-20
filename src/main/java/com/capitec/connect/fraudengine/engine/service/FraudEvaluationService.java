@@ -18,7 +18,6 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -35,12 +34,12 @@ public class FraudEvaluationService {
     private final TransactionMapper transactionMapper;
     private final FraudAlertMapper fraudAlertMapper;
     private final FraudEngineProperties engineProperties;
-    private final FraudEventProducer fraudEventProducer;
-    private final AccountHistoryCacheService accountHistoryCacheService;
+    private final EvaluationOutboxService evaluationOutboxService;
+    private final AccountHistoryService accountHistoryService;
 
     /**
      * Evaluates a transaction for fraud with circuit breaker and rate limiting protection.
-     * Falls back to basic evaluation if the fraud engine is unavailable.
+     * Rejects requests when the engine is unavailable rather than returning an unverified result.
      *
      * @param dto the transaction request
      * @return evaluation summary
@@ -57,14 +56,15 @@ public class FraudEvaluationService {
         }
 
         Transaction transaction = transactionMapper.toDomain(dto);
-        TransactionEntity transactionEntity = transactionMapper.toEntity(transaction);
-        transactionRepository.save(transactionEntity);
-
-        Instant historyCutoff = Instant.now().minus(engineProperties.getEvaluation().getHistoryWindow());
-        accountHistoryCacheService.evictAccountHistoryCache(dto.accountId(), historyCutoff);
-        List<Transaction> accountHistory = accountHistoryCacheService.getCachedAccountHistory(dto.accountId(), historyCutoff);
+        Instant historyCutoff = transaction.timestamp().minus(engineProperties.getEvaluation().getHistoryWindow());
+        List<Transaction> accountHistory = accountHistoryService.findHistory(
+            transaction.accountId(), historyCutoff, transaction.timestamp()).stream()
+            .filter(previous -> !previous.id().equals(transaction.id()))
+            .toList();
 
         EvaluationSummary summary = fraudEngine.evaluate(transaction, accountHistory);
+        TransactionEntity transactionEntity = transactionMapper.toEntity(transaction);
+        transactionRepository.save(transactionEntity);
 
         if (summary.alerts() != null && !summary.alerts().isEmpty()) {
             List<FraudAlertEntity> alertEntities = summary.alerts().stream()
