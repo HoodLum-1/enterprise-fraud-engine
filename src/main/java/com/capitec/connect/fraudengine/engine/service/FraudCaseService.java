@@ -1,6 +1,8 @@
 package com.capitec.connect.fraudengine.engine.service;
 
 import com.capitec.connect.fraudengine.domain.model.FraudCase;
+import com.capitec.connect.fraudengine.domain.model.CaseStatus;
+import com.capitec.connect.fraudengine.api.exception.TransactionNotFoundException;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudCaseEntity;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudCaseMapper;
@@ -10,8 +12,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Slf4j
 @Service
@@ -22,10 +25,8 @@ public class FraudCaseService {
     private final FraudCaseMapper fraudCaseMapper;
 
     @Transactional(readOnly = true)
-    public List<FraudCase> findAll() {
-        return fraudCaseRepository.findAll().stream()
-                .map(fraudCaseMapper::toDomain)
-                .toList();
+    public Page<FraudCase> findAll(Pageable pageable) {
+        return fraudCaseRepository.findAll(pageable).map(fraudCaseMapper::toDomain);
     }
 
     @Transactional(readOnly = true)
@@ -45,10 +46,11 @@ public class FraudCaseService {
     }
 
     @Transactional
-    public FraudCase updateStatus(UUID transactionId, String newStatus) {
+    public FraudCase updateStatus(UUID transactionId, CaseStatus newStatus, String updatedBy) {
         FraudCaseEntity entity = fraudCaseRepository.findByTransactionId(transactionId)
-                .orElseThrow(() -> new IllegalArgumentException("Fraud case not found for transaction: " + transactionId));
-        entity.updateStatus(newStatus);
+                .orElseThrow(() -> new TransactionNotFoundException(
+                    "Fraud case not found for transaction: " + transactionId));
+        entity.updateStatus(newStatus, updatedBy);
         FraudCaseEntity saved = fraudCaseRepository.save(entity);
         log.info("Updated fraud case ID {} status to {}", saved.getId(), newStatus);
         return fraudCaseMapper.toDomain(saved);

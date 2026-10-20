@@ -3,20 +3,27 @@ package com.capitec.connect.fraudengine.api.controller;
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.dto.response.EvaluationSummaryResponseDto;
 import com.capitec.connect.fraudengine.api.dto.response.FraudAlertResponseDto;
+import com.capitec.connect.fraudengine.api.dto.response.TransactionDetailsResponseDto;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.engine.service.FraudEvaluationService;
+import com.capitec.connect.fraudengine.engine.service.TransactionQueryService;
+import com.capitec.connect.fraudengine.infrastructure.security.AccountAccessPolicy;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.core.Authentication;
 
 import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @RestController
@@ -26,6 +33,8 @@ public class TransactionController {
 
     private final FraudEvaluationService fraudEvaluationService;
     private final FraudAlertMapper fraudAlertMapper;
+    private final TransactionQueryService transactionQueryService;
+    private final AccountAccessPolicy accountAccessPolicy;
 
     @PostMapping("/evaluate")
     public ResponseEntity<EvaluationSummaryResponseDto> evaluateTransaction(
@@ -36,6 +45,15 @@ public class TransactionController {
         EvaluationSummaryResponseDto responseDto = toResponseDto(summary);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(responseDto);
+    }
+
+    @GetMapping("/{transactionId}")
+    public ResponseEntity<TransactionDetailsResponseDto> getTransaction(
+            @PathVariable UUID transactionId,
+            Authentication authentication) {
+        TransactionDetailsResponseDto details = transactionQueryService.getDetails(transactionId);
+        accountAccessPolicy.verifyAccess(details.accountId(), authentication);
+        return ResponseEntity.ok(details);
     }
 
     private EvaluationSummaryResponseDto toResponseDto(EvaluationSummary summary) {

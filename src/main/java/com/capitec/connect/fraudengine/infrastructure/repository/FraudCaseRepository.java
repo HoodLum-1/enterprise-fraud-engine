@@ -10,4 +10,5 @@ import java.util.UUID;
 @Repository
 public interface FraudCaseRepository extends JpaRepository<FraudCaseEntity, UUID> {
     Optional<FraudCaseEntity> findByTransactionId(UUID transactionId);
+    boolean existsByTransactionId(UUID transactionId);
 }
