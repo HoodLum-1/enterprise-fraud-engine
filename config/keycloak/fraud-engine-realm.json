@@ -24,7 +24,11 @@
     {
       "username": "fraud-analyst",
       "enabled": true,
+      "firstName": "Fraud",
+      "lastName": "Analyst",
+      "email": "fraud-analyst@example.test",
       "emailVerified": true,
+      "requiredActions": [],
       "credentials": [
         {
           "type": "password",
@@ -39,7 +43,11 @@
     {
       "username": "fraud-viewer",
       "enabled": true,
+      "firstName": "Fraud",
+      "lastName": "Viewer",
+      "email": "fraud-viewer@example.test",
       "emailVerified": true,
+      "requiredActions": [],
       "credentials": [
         {
           "type": "password",

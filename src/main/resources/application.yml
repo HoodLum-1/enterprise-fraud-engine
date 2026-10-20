@@ -89,13 +89,22 @@ fraud:
         time-gap-threshold: 10m
         risk-score: 60
         severity: CRITICAL
+    freeze-policy:
+      enabled: true
+      minimum-risk-score: 80
+      minimum-severity: CRITICAL
+    messaging:
+      transaction-topic: transactions-topic
+      evaluation-topic: fraud-alerts-topic
+      account-actions-topic: account-actions-topic
+      outbox-poll-delay-ms: 1000
+      outbox-publisher-enabled: true
 
 server:
   port: 8080
 
-#Disabled security for testing purposes, Keycloak needs to be configured when container is running
 security:
-  enabled: false
+  enabled: ${SECURITY_ENABLED:true}
 
 management:
   endpoints:

@@ -84,6 +84,7 @@ echo "1. Testing Clean Low-Risk Transaction (Expect HTTP 201)..."
 echo "------------------------------------------------------------"
 HTTP_CODE=$(curl -s -o /tmp/clean_tx_response.json -w "%{http_code}" -X POST "$BASE_URL/api/v1/transactions/evaluate" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{
     \"id\": \"$CLEAN_TX_ID\",
     \"accountId\": \"$ACCOUNT_ID\",
@@ -111,6 +112,7 @@ echo "2. Testing High-Amount Rule Trigger (Expect HTTP 201)..."
 echo "------------------------------------------------------------"
 HTTP_CODE=$(curl -s -o /tmp/high_amount_response.json -w "%{http_code}" -X POST "$BASE_URL/api/v1/transactions/evaluate" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{
     \"id\": \"$HIGH_AMOUNT_TX_ID\",
     \"accountId\": \"$ACCOUNT_ID\",
@@ -138,6 +140,7 @@ echo "3. Testing Idempotency Duplicate Check (Expect HTTP 409 Conflict)..."
 echo "------------------------------------------------------------"
 HTTP_CODE=$(curl -s -o /tmp/duplicate_response.json -w "%{http_code}" -X POST "$BASE_URL/api/v1/transactions/evaluate" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{
     \"id\": \"$CLEAN_TX_ID\",
     \"accountId\": \"$ACCOUNT_ID\",
@@ -165,6 +168,7 @@ echo "4. Testing Bean Validation Failure (Expect HTTP 400 Bad Request)..."
 echo "------------------------------------------------------------"
 HTTP_CODE=$(curl -s -o /tmp/validation_response.json -w "%{http_code}" -X POST "$BASE_URL/api/v1/transactions/evaluate" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{
     \"id\": null,
     \"accountId\": \"\",
@@ -255,7 +259,8 @@ echo ""
 echo "------------------------------------------------------------"
 echo "8. Checking Actuator Prometheus Metrics (Expect HTTP 200 OK)..."
 echo "------------------------------------------------------------"
-HTTP_CODE=$(curl -s -o /tmp/metrics_response.txt -w "%{http_code}" -X GET "$BASE_URL/actuator/prometheus")
+HTTP_CODE=$(curl -s -o /tmp/metrics_response.txt -w "%{http_code}" -H "Authorization: Bearer $TOKEN" \
+  -X GET "$BASE_URL/actuator/prometheus")
 
 echo "Response code: $HTTP_CODE"
 head -n 15 /tmp/metrics_response.txt
