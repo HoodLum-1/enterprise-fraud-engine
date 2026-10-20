@@ -2,6 +2,9 @@ package com.capitec.connect.fraudengine.engine.service;
 
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException;
+import com.capitec.connect.fraudengine.api.exception.EvaluationUnavailableException;
+import com.capitec.connect.fraudengine.api.exception.RateLimitExceededException;
+import com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.domain.model.Transaction;
 import com.capitec.connect.fraudengine.engine.FraudEngine;
@@ -9,7 +12,8 @@ import com.capitec.connect.fraudengine.infrastructure.entity.FraudAlertEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.TransactionEntity;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
 import com.capitec.connect.fraudengine.infrastructure.mapper.TransactionMapper;
-import com.capitec.connect.fraudengine.infrastructure.messaging.FraudEventProducer;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import com.capitec.connect.fraudengine.infrastructure.repository.FraudAlertRepository;
 import com.capitec.connect.fraudengine.infrastructure.repository.TransactionRepository;
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
@@ -74,64 +78,34 @@ public class FraudEvaluationService {
             log.info("Persisted {} fraud alert(s) for transaction id: {}", alertEntities.size(), dto.id());
         }
 
-        fraudEventProducer.publishEvaluationEvent(transaction, summary);
+        evaluationOutboxService.enqueueEvaluation(transaction, summary);
 
         return summary;
     }
 
     /**
-     * Fallback method for circuit breaker.
-     * Performs basic evaluation without rule engine if the engine is unavailable.
-     * Runs in a separate transaction (REQUIRES_NEW) because:
-     * - If main method throws: main transaction rolls back, fallback runs in new transaction
-     * - If circuit breaker is OPEN: main method not executed, fallback runs in new transaction
-     * Package-private to prevent direct invocation.
+     * Fail closed when resilience controls reject evaluation or the engine is unavailable.
      *
      * @param dto the transaction request
      * @param ex the exception that triggered the fallback
-     * @return basic evaluation summary
+     * @return evaluation summary
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     EvaluationSummary evaluateFallback(TransactionRequestDto dto, Exception ex) {
-        log.warn("Circuit breaker triggered for fraud engine, using fallback evaluation for transaction: {}. Reason: {}",
-            dto.id(), ex.getMessage());
-
-        if (transactionRepository.existsById(dto.id())) {
-            log.warn("Duplicate transaction detected in fallback with id: {}", dto.id());
-            throw new DuplicateTransactionException(dto.id());
+        if (ex instanceof RequestNotPermitted) {
+            log.warn("Rate limit rejected transaction evaluation for {}", dto.id());
+            throw new RateLimitExceededException(ex);
         }
-
-        Transaction transaction = transactionMapper.toDomain(dto);
-        TransactionEntity transactionEntity = transactionMapper.toEntity(transaction);
-        transactionRepository.save(transactionEntity);
-
-        EvaluationSummary fallbackSummary = buildFallbackSummary(transaction);
-
-        fraudEventProducer.publishEvaluationEvent(transaction, fallbackSummary);
-
-        return fallbackSummary;
-    }
-
-    /**
-     * Builds a minimal evaluation summary when the fraud engine is unavailable.
-     * Only checks the high-amount threshold as a basic safeguard.
-     */
-    private EvaluationSummary buildFallbackSummary(Transaction transaction) {
-        boolean isHighAmount = transaction.amount() != null
-            && transaction.amount().compareTo(java.math.BigDecimal.valueOf(50000)) > 0;
-
-        int riskScore = isHighAmount ? 40 : 0;
-        com.capitec.connect.fraudengine.domain.model.Severity severity =
-            isHighAmount ? com.capitec.connect.fraudengine.domain.model.Severity.HIGH
-                : com.capitec.connect.fraudengine.domain.model.Severity.LOW;
-
-        return new EvaluationSummary(
-            transaction.id(),
-            transaction.accountId(),
-            riskScore,
-            severity,
-            List.of(),
-            List.of()
-        );
+        if (ex instanceof DuplicateTransactionException duplicate) {
+            throw duplicate;
+        }
+        if (ex instanceof UnsupportedCurrencyException unsupportedCurrency) {
+            throw unsupportedCurrency;
+        }
+        if (ex instanceof CallNotPermittedException) {
+            log.warn("Circuit breaker is open for transaction evaluation {}", dto.id());
+        } else {
+            log.error("Fraud evaluation unavailable for transaction {}: {}", dto.id(), ex.getMessage(), ex);
+        }
+        throw new EvaluationUnavailableException(ex);
     }
 }
