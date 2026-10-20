@@ -1,360 +1,98 @@
-# Fraud Engine Technical Architecture
+# Fraud Engine Architecture
 
-### 1. Architectural Overview & Hexagonal Architecture (Ports and Adapters)
+## Runtime shape
 
-The **Fraud Engine** is designed following the **Hexagonal Architecture** (also known as Ports and Adapters) to ensure complete separation of business logic, domain models, and external infrastructure/protocols.
+The service has two inbound adapters: the REST API and a Kafka transaction listener. Both call the same evaluation service. Rule execution and domain records live in `engine` and `domain`; persistence, JWT conversion, Kafka clients, and outbox delivery are infrastructure adapters.
 
-```
-+-----------------------------------------------------------------------------------+
-|                                 INBOUND ADAPTERS                                  |
-|  - REST Controllers (TransactionController, FraudAlertController, FraudCaseController) |
-|  - Request / Response DTOs & Jakarta Bean Validation                              |
-|  - RFC 7807 Global Exception Handling                                            |
-|  - OpenAPI 3.0 / Swagger UI Documentation                                        |
-+-----------------------------------------------------------------------------------+
-                                          │
-                                          ▼ (Inbound Ports / DTOs)
-+-----------------------------------------------------------------------------------+
-|                              APPLICATION / DOMAIN                                 |
-|  - FraudEvaluationService (Orchestrates ingestion, persistence & evaluation)      |
-|  - FraudEngine (Rule chain orchestrator)                                          |
-|  - Domain Rules (HighAmountRule, TransactionVelocityRule, LocationMismatchRule)   |
-|  - Domain Records (Transaction, FraudAlert, FraudCase, RuleEvaluationResult, Severity) |
-|  - Resilience4j: Circuit Breaker, Rate Limiter, Retry                            |
-+-----------------------------------------------------------------------------------+
-                                          │
-                ┌───────────────────────────┼───────────────────────────┐
-                ▼                           ▼                           ▼
-       (Outbound Ports)           (Outbound Ports)           (Outbound Ports)
-+-----------------------------------------------------------------------------------+
-|                               OUTBOUND ADAPTERS                                   |
-|  - Spring Data Repositories (TransactionRepository, FraudAlertRepository, FraudCaseRepository) |
-|  - JPA Entities (TransactionEntity, FraudAlertEntity, FraudCaseEntity)            |
-|  - PostgreSQL Database & Flyway Schema Migrations (V1, V2, V3)                    |
-|  - Redis Cache (Lettuce) — account-history (5-min buckets, 10min TTL)            |
-|  - Kafka Producer (Spring Kafka) — fraud-alerts-topic, async CompletableFuture, enable.idempotence, transactional.id |
-|  - HikariCP Connection Pooling & Spring Actuator / Prometheus                     |
-+-----------------------------------------------------------------------------------+
+```text
+REST / transactions-topic
+          |
+          v
+FraudEvaluationService
+   |-- read event-time account history
+   |-- evaluate ordered rules
+   |-- persist transaction + alerts + outbox row atomically
+   `-- return EvaluationSummary
+          |
+          v
+PostgreSQL outbox publisher --acknowledged publish--> Kafka topics
+          |
+          `-- FraudAlertConsumer: flagged case/notification, audited freeze command
 ```
 
-#### Layers & Boundaries:
+This is a layered application with domain-focused packages and ports/adapters at infrastructure boundaries; it is not a claim of strict compile-time hexagonal isolation. REST request/response DTOs are kept separate from domain records and persistence entities.
 
-1. **API / Inbound Adapters (`api.*`)**:
-   - HTTP endpoints accepting evaluation requests and providing alert and fraud-case management.
-   - Enforces Jakarta Bean Validation on input DTOs (`TransactionRequestDto`).
-   - Normalizes errors into standard RFC 7807 `ProblemDetail` structures.
-   - Exposes OpenAPI 3.0 spec at `/v3/api-docs` and Swagger UI at `/swagger-ui.html`.
+## Evaluation and rule semantics
 
-2. **Domain & Engine (`domain.*`, `engine.*`)**:
-   - Pure domain business logic and immutable data models (`Transaction`, `FraudAlert`, `FraudCase`, `EvaluationSummary`).
-   - Compact constructors enforce validation rules and domain invariants (positive amounts, non-null UUIDs, valid timestamps).
-   - `FraudEngine` orchestrates the evaluation without knowing about HTTP or persistence specifics.
-   - **Chain of Responsibility** pattern for fraud rules — decoupled, ordered, conditionally activated.
+`FraudEvaluationService` first checks idempotency, then loads prior account transactions using the incoming transaction's event timestamp and configured `fraud.engine.evaluation.history-window`. The incoming transaction ID is excluded from history. It evaluates before saving the transaction, then persists the transaction, triggered alerts, and `TRANSACTION_EVALUATED` outbox record in one database transaction. A concurrent duplicate that passes the initial check is rejected by the database primary key and normalized to `409 Conflict`.
 
-3. **Application Service (`engine.service.FraudEvaluationService`)**:
-   - Single `@Transactional` entry point for the full evaluation pipeline.
-   - **Resilience4j** fault tolerance: `@CircuitBreaker`, `@RateLimiter`, `@Retry` on `evaluate()`.
-   - Fallback method (`evaluateFallback`) provides degraded functionality (basic high-amount check) when the rule engine is unavailable.
-   - Idempotency check **before** circuit breaker — business exceptions (`DuplicateTransactionException`, validation errors) are ignored by the breaker via `ignoreExceptions`.
-   - Publishes `TransactionEvaluatedEvent` to Kafka asynchronously (non-blocking).
-   - Fraud cases are created by the Kafka consumer after the event is consumed; case creation is asynchronous relative to the evaluation response.
+Rules are independent `FraudRule` components, ordered by Spring `@Order`. Each triggered rule contributes its configured risk points; `FraudEngine` derives overall severity from the combined score. Configuration and enabled flags are in `FraudEngineProperties` and `application.yml`.
 
-4. **Infrastructure / Outbound Adapters (`infrastructure.*`)**:
-   - Maps between domain records and database entities using dedicated mappers (`TransactionMapper`, `FraudAlertMapper`, `FraudCaseMapper`).
-   - Handles persistence via Spring Data JPA and PostgreSQL.
-   - `FraudCaseController` exposes case listing, transaction-ID lookup, and review-status updates under `/api/v1/fraud-cases`.
-   - `FraudAlertConsumer` consumes events from `fraud-alerts-topic` and persists one `PENDING_REVIEW` case per transaction if one does not already exist. The case may not be queryable immediately after evaluation returns.
-   - Valid case statuses are `PENDING_REVIEW`, `CONFIRMED_FRAUD`, `FALSE_POSITIVE`, and `RESOLVED`.
-   - Critical events (severity `CRITICAL` or risk score at least 80) also publish an `ACCOUNT_FREEZE` command to `account-actions-topic`.
-   - **Redis Cache** (`CacheConfiguration`): `account-history` cache (10min TTL, 5-minute time buckets) — for sub-50ms historical lookups.
-   - **Kafka Producer** (`FraudEventProducer`): async publish to `fraud-alerts-topic` with `CompletableFuture` callback, keyed by `accountId`, idempotent producer with `transactional.id`.
-   - Externalizes configuration with `@ConfigurationProperties` (`FraudEngineProperties`).
+| Rule | Inputs and window | Default condition | Default score / severity |
+|---|---|---|---|
+| `HighAmountRule` | Current amount and currency | Amount exceeds the explicitly configured threshold; default is ZAR 50,000. Unsupported currencies are rejected. | 40 / HIGH |
+| `TransactionVelocityRule` | Current transaction plus prior account events in the 2-minute window | More than 3 total transactions; 3 is allowed and the 4th triggers. | 50 / CRITICAL |
+| `LocationMismatchRule` | Current location and prior account history at event time | Latest prior transaction differs in location and is within the configured 10-minute gap. Current transaction is never its own comparison event. | 60 / CRITICAL |
+| `CategoryBasedRiskRule` | Normalized transaction category | Category is `GAMBLING` or `CRYPTO`. | 30 / MEDIUM |
 
----
+All windows and thresholds are configurable. Amount comparisons are performed only against a configured threshold for the transaction currency; there is no implicit currency conversion.
 
-### 2. Chain of Responsibility Pattern for Fraud Rules
+## Persistence, event delivery, and case workflow
 
-The engine uses the **Chain of Responsibility** design pattern to evaluate transactions across a series of decoupled, modular fraud detection rules.
+The evaluation database transaction writes the transaction, its triggered alerts, and a typed event into `evaluation_outbox`. A scheduled publisher claims due rows with PostgreSQL `FOR UPDATE SKIP LOCKED`, publishes to Kafka, then marks rows delivered. Failed sends are retained for retry with increasing delay. This is an at-least-once delivery design: Kafka can receive a duplicate if publishing succeeds but the database acknowledgement update fails. Downstream processing must therefore be idempotent by event ID.
 
-```
-Incoming Transaction + 24h Account History
-                     │
-                     ▼
-   +───────────────────────────────────+
-   │   FraudEngine Orchestrator        │
-   │   - Injects List<FraudRule>       │
-   │   - Executes in sorted @Order     │
-   +───────────────────────────────────+
-         │               │               │
-         ▼ (Order 1)     ▼ (Order 2)     ▼ (Order 3)
-    ┌───────────┐   ┌───────────┐   ┌───────────┐
-    │HighAmount │   │Transaction│   │ Location  │
-    │   Rule    │   │ Velocity  │   │ Mismatch  │
-    └─────┬─────┘   └─────┬─────┘   └─────┬─────┘
-          │               │               │
-          └───────────────┼───────────────┘
-                          ▼
-         Aggregate Risk Score & Severity
-                          ▼
-                  EvaluationSummary
-```
+The transaction input topic defaults to `transactions-topic`. Its JSON payload uses the same fields as `TransactionRequestDto`; the listener invokes the same evaluation path as the REST endpoint. Malformed or repeatedly failing messages follow the configured Kafka error handler/DLQ behavior.
 
-#### Key Characteristics:
-- **`FraudRule` Interface**: Standard interface requiring `getRuleName()`, `getOrder()`, and `evaluate(Transaction, List<Transaction>)`.
-- **Deterministic Rule Ordering**: Injected via Spring's `@Order` annotations (1→HighAmount, 2→Velocity, 3→LocationMismatch).
-- **Dynamic Rule Configuration & Conditional Activation**:
-  - Each rule annotated with `@ConditionalOnProperty(name = "fraud.engine.rules.<rule>.enabled", matchIfMissing = true)`.
-  - Thresholds, evaluation windows, risk scores, and severities externalized to `application.yml` via `FraudEngineProperties`.
-- **Non-blocking Rule Pipeline**: All rules evaluate against the same immutable state; individual triggered rules append evaluation results without halting subsequent rule checks.
-- **Rule Wiring Requirement**: Adding a new rule requires three wiring points:
-  1. Implement `FraudRule` with `@Component`, `@Order(n)`, `@ConditionalOnProperty(prefix = "fraud.engine.rules.<key>", ...)`
-  2. Add nested config class to `FraudEngineProperties`
-  3. Add YAML block under `fraud.engine.rules` in `application.yml`
-- **Constructor Injection Bug Fix**: Rule constructors taking `FraudEngineProperties` **must** be annotated `@Autowired`; otherwise Spring falls back to the no-arg constructor and YAML config is silently ignored.
+`FraudAlertConsumer` creates a `PENDING_REVIEW` case and logs the flagged-notification placeholder only when the evaluation reports fraud or contains triggered alerts. It does not create a case for a clean evaluation. No external customer-notification provider is integrated. Case status is an enum with explicit allowed transitions; optimistic locking prevents lost concurrent updates, and the updating principal is recorded. Case creation is asynchronous relative to evaluation.
 
----
+An `ACCOUNT_FREEZE` event is generated only when the configurable freeze policy is met (by default, CRITICAL severity or score at least 80). The consumer persists a `freeze_audit` record and typed outbox command in its database transaction. This provides an audit record and reliable command delivery; the policy should be aligned with the institution's customer-impact and authorization requirements.
 
-### 3. Transactional Boundaries & State Management
+## HTTP API and authorization
 
-The transactional lifecycle is managed inside `FraudEvaluationService` using Spring's declarative `@Transactional`:
+JWT resource-server security is enabled by default. `SecurityConfig` is stateless and converts realm/client/scope authorities through `JwtAuthConverter`.
 
-```
-Client Request
-      │
-      ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ FraudEvaluationService.evaluateTransaction() [@Transactional]          │
-│                                                                        │
-│  1. Idempotency Check:                                                │
-│     Verify transaction.id does NOT exist in TransactionRepository.     │
-│     -> Throws DuplicateTransactionException (409 Conflict) on match.   │
-│                                                                        │
-│  2. Ingest Transaction:                                                │
-│     Map DTO -> Domain Transaction -> TransactionEntity -> Save.       │
-│                                                                        │
-│  3. Historical Data Fetch (Cached):                                    │
-│     Retrieve accountId history within the configured window.           │
-│     -> AccountHistoryCacheService.evictAccountHistoryCache() first,    │
-│        then @Cacheable getCachedAccountHistory() (Redis, 10min TTL)     │
-│                                                                        │
-│  4. Evaluate Rules (Resilience4j Protected):                          │
-│     @CircuitBreaker(name="fraudEngine")                                │
-│     @RateLimiter(name="fraudEngine")                                   │
-│     Execute FraudEngine rule chain.                                    │
-│                                                                        │
-│  5. Persist Alerts:                                                    │
-│     Map triggered alerts -> FraudAlertEntity -> Save all alerts.       │
-│                                                                        │
-│  6. Async Event Publishing:                                            │
-│     fraudEventProducer.publishEvaluationEvent() -> Kafka (async).     │
-│                                                                        │
-│  7. Return Evaluation Summary.                                         │
-└────────────────────────────────────────────────────────────────────────┘
-```
+| Endpoint | Required access |
+|---|---|
+| `POST /api/v1/transactions/evaluate` | `TRANSACTION_INGESTOR` or `FRAUD_ANALYST` |
+| `GET /api/v1/transactions/{transactionId}` | `FRAUD_ANALYST` or the owning account holder |
+| `GET /api/v1/fraud-alerts/account/{accountId}` | `FRAUD_ANALYST` or a caller whose JWT account claim matches the path account |
+| `/api/v1/fraud-cases/**` | `FRAUD_ANALYST` |
+| Health, Swagger UI, OpenAPI | Public; other endpoints require authentication |
 
-After the evaluation event is consumed, `FraudAlertConsumer` persists a fraud case with initial status `PENDING_REVIEW`. This asynchronous work does not delay the transaction evaluation response. The unique constraint on `fraud_cases.transaction_id` and consumer duplicate check prevent duplicate case records.
+Alert queries accept optional `severity`, `ruleName`, `from`, and `to` filters. Alerts and case lists use Spring Data pagination with a default page size of 20 and maximum size of 100. Transaction lookup returns transaction details and its alerts. API errors are normalized to RFC 7807 `ProblemDetail`; rate limiting returns `429` with `Retry-After`, while circuit-breaker or evaluation unavailability returns `503` with `Retry-After`. Duplicate transaction IDs return `409`.
 
-#### Fraud Case API
+## Resilience and operational boundaries
 
-| Method | Path | Behavior |
-|--------|------|----------|
-| `GET` | `/api/v1/fraud-cases` | Returns all fraud cases |
-| `GET` | `/api/v1/fraud-cases/transaction/{transactionId}` | Returns the case for a transaction, or `404` if not found |
-| `PATCH` | `/api/v1/fraud-cases/{transactionId}/status?status={status}` | Updates the case status; valid values are `PENDING_REVIEW`, `CONFIRMED_FRAUD`, `FALSE_POSITIVE`, and `RESOLVED` |
+Resilience4j applies a process-local rate limiter and circuit breaker to evaluation. A rejected request is not persisted or returned as a clean evaluation: rate-limit rejection is `429`, and other unavailable-engine failures are `503`. The rate limiter is not distributed across replicas; enforce client- or tenant-specific quotas at an API gateway in a multi-instance deployment.
 
-The case response contains `id`, `transactionId`, `accountId`, `totalRiskScore`, `overallSeverity`, `status`, `createdAt`, and `updatedAt`. Status updates return `400` for an unsupported status and `404` when the transaction has no case.
+PostgreSQL is the system of record. Flyway migrations run in the main and integration configurations; integration tests use PostgreSQL with Flyway on and Hibernate schema validation. The `dev` profile adds only development seed data and disables security for local use. The historical V2 seed migration remains immutable; V5 removes its demo rows, and the V6 seed lives in the development migration location.
 
-#### Idempotency & Relational Integrity:
-- **Idempotency Guarantee**: Primary key UUID collisions caught early. Concurrent duplicates that race past the check fail on the PK constraint and are normalized to 409 Conflict by `GlobalExceptionHandler` (handles `DataIntegrityViolationException`).
-- **Cascading Foreign Keys**: `fraud_alerts.transaction_id` references `transactions.id` with `ON DELETE CASCADE`.
-- **ACID Compliance**: Entire evaluation, ingestion, and alert generation cycle in a single atomic DB transaction.
-- **Circuit Breaker Business Exception Ignorance**: `DuplicateTransactionException`, `ConstraintViolationException`, `MethodArgumentNotValidException` are in `ignoreExceptions` — they don't trip the breaker.
+Redis was removed because the previous cache was invalidated on every write-path lookup and did not provide a useful hit. No latency claim is made for history retrieval. The outbox addresses DB-to-Kafka dual-write loss, but the service does not claim exactly-once delivery.
 
----
+Actuator exposes health, info, metrics, and Prometheus endpoints; health details are hidden. The application does not currently implement Retry, virtual threads, OpenTelemetry tracing, or correlation IDs.
 
-### 4. Concurrency & Performance Optimization
+## Main components
 
-To support high-throughput, low-latency transaction processing:
+| Concern | Location |
+|---|---|
+| REST request/response and RFC 7807 errors | `api.controller`, `api.dto`, `api.exception` |
+| Evaluation orchestration and rule components | `engine.service`, `engine.rule` |
+| Domain records and case state | `domain.model` |
+| JPA entities, repositories, Flyway migrations | `infrastructure.entity`, `infrastructure.repository`, `db/migration` |
+| JWT resource server and account ownership | `infrastructure.config.SecurityConfig`, `infrastructure.security` |
+| Kafka input, typed output, outbox, fraud consumer | `infrastructure.messaging`, `engine.service.EvaluationOutboxService` |
 
-1. **Connection Pool Tuning (HikariCP)**:
-   - `maximum-pool-size`: 20 connections (balance parallelism vs. DB contention).
-   - `minimum-idle`: 5 connections (instant workload spikes).
-   - `connection-timeout`: 20,000 ms (avoid indefinite thread blocking).
+## Tests
 
-2. **Database Indexing Strategy**:
-   - `idx_transactions_account_timestamp` on `transactions(account_id, timestamp)`: Accelerates sliding-window historical lookups (window configurable via `fraud.engine.evaluation.history-window`, default `PT24H`).
-   - `idx_fraud_alerts_account_flagged_at` on `fraud_alerts(account_id, flagged_at)`: Optimizes alert retrieval queries ordered chronologically.
-   - `idx_fraud_alerts_transaction` on `fraud_alerts(transaction_id)`: Fast lookup by transaction.
+- Unit tests use H2, disable Flyway, and use Hibernate `create-drop`; they do not prove production-schema compatibility.
+- Integration tests use Testcontainers PostgreSQL and Kafka, run Flyway, and set Hibernate to `validate`.
+- Integration coverage includes the REST location-mismatch flow, Kafka transaction ingestion, outbox publishing, case/freeze processing, and real HTTP rate-limit and unavailable-engine responses.
+- Run all configured tests with `./mvnw test`; Docker is required for the Testcontainers suite.
 
-3. **Stateless Service Design**:
-   - `FraudEngine` and all `FraudRule` beans are stateless Spring singletons — concurrent threads evaluate without synchronization locks.
+## Deliberate scope limits
 
-4. **Redis Caching (`infrastructure.cache.CacheConfiguration`)**:
-   - **`account-history`** (10min TTL): Caches `AccountHistoryCacheService.getCachedAccountHistory(accountId, historyCutoff)` results — key: `accountId:cutoffEpochMilli/300000` (5-minute bucket). Sub-50ms for repeated lookups; empty results are never cached (`unless = "#result.isEmpty()"`).
-   - **Cache Eviction**: `@CacheEvict` on `evictAccountHistoryCache(...)` with the *same* bucket key, invoked right after the new transaction is inserted and before the cached read — so rule evaluation always sees a history that includes the current transaction.
-   - Serialization: `StringRedisSerializer` (keys), `GenericJackson2JsonRedisSerializer` + `JavaTimeModule` (values, ISO-8601 timestamps). Cache values must be a mutable `ArrayList`: Jackson cannot write a root type id for `List.of()`/`Stream.toList()` (`ImmutableCollections$ListN`), which would make cache hits fail to deserialize.
-
-5. **Async Kafka Publishing**:
-   - `KafkaTemplate.send()` returns `CompletableFuture` — non-blocking, fire-and-forget with callback logging.
-   - Producer config: `acks=all`, `retries=3`, JSON serializer with trusted packages.
-
----
-
-### 5. Asynchronous Event Publishing, Fraud Cases & Kafka Integration
-
-#### Event Model: `TransactionEvaluatedEvent`
-Published to topic **`fraud-alerts-topic`** for every evaluated transaction (clean or flagged).
-
-```json
-{
-  "eventId": "uuid",
-  "eventType": "TRANSACTION_EVALUATED",
-  "timestamp": "2026-01-15T10:00:00.000Z",
-  "transactionId": "uuid",
-  "accountId": "ACC-DEMO-1001",
-  "amount": 75000.00,
-  "currency": "ZAR",
-  "category": "ELECTRONICS",
-  "merchantName": "iStore Sandton City",
-  "location": "Johannesburg",
-  "totalRiskScore": 40,
-  "overallSeverity": "HIGH",
-  "isFraudulent": true,
-  "triggeredRules": [
-    {
-      "ruleName": "HighAmountRule",
-      "triggered": true,
-      "riskScore": 40,
-      "severity": "HIGH",
-      "reason": "Transaction amount exceeds threshold of 50000.00"
-    }
-  ],
-  "alertsGenerated": 1
-}
-```
-
-#### Producer Configuration (`application.yml`):
-```yaml
-spring:
-  kafka:
-    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
-      properties:
-        spring.json.type.mapping: "TransactionEvaluatedEvent:com.capitec.connect.fraudengine.infrastructure.messaging.TransactionEvaluatedEvent"
-        spring.json.trusted.packages: "com.capitec.connect.fraudengine.infrastructure.messaging"
-        enable.idempotence: true
-        max.in.flight.requests.per.connection: 5
-        transactional.id: fraud-engine-producer
-      retries: 3
-      acks: all
-```
-
-#### Key Guarantees:
-- **At-least-once delivery**: `acks=all` + retries.
-- **Non-blocking**: `CompletableFuture` callback — evaluation HTTP response returns before Kafka ack.
-- **Keyed by accountId**: Ensures ordering per account for downstream consumers.
-- **Trusted packages**: Only `fraud-engine` event types deserialized by consumers.
-
-#### Fraud Case Consumer
-
-`FraudAlertConsumer` listens to `fraud-alerts-topic`. For each transaction evaluation event, it creates a case with the transaction/account IDs, risk score, severity, and `PENDING_REVIEW` status. Existing cases are left unchanged on duplicate event delivery. Cases are created for all evaluated transactions regardless of risk score; fraud alerts remain the separate rule-triggered records.
-
-For `CRITICAL` severity or a risk score of at least 80, the consumer also publishes an account-freeze command to `account-actions-topic`. Case persistence uses `fraud_cases`, whose `transaction_id` column is unique. Case creation is asynchronous and is not part of the transaction evaluation response.
-
----
-
-### 6. Resilience4j Fault Tolerance
-
-Applied to `FraudEvaluationService.evaluate()` — the critical path.
-
-| Pattern | Config (`fraudEngine` instance) | Purpose |
-|---------|--------------------------------|---------|
-| **Circuit Breaker** | Sliding window: 10 calls, 50% failure threshold, 30s open state, 3 half-open calls | Prevent cascading failures when DB/Redis/Kafka degrade |
-| **Rate Limiter** | 100 calls / 60s, 1s timeout | Protect downstream from traffic spikes |
-
-
-#### Circuit Breaker State Machine:
-```
-CLOSED (normal) --(failureRate>=50%)--> OPEN (reject fast) --(30s)--> HALF_OPEN (probe) --(success)--> CLOSED
-                                              ^                          |
-                                              |--(failure)---------------|
-```
-
-#### Ignore Business Exceptions (Critical):
-```yaml
-resilience4j:
-  circuitbreaker:
-    instances:
-      fraudEngine:
-        ignoreExceptions:
-          - com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException
-          - jakarta.validation.ConstraintViolationException
-          - org.springframework.web.bind.MethodArgumentNotValidException
-```
-Business violations (409, 400) **do not** count as failures — only infrastructure exceptions (DB timeout, Kafka unreachable, Redis down) trip the breaker.
-
-#### Fallback Behavior (`evaluateFallback`):
-When breaker is OPEN or rate limiter rejects:
-1. Re-check idempotency (throw 409 if duplicate).
-2. Persist transaction (audit trail).
-3. **Basic high-amount check only** (threshold 50,000) — no velocity, no location mismatch.
-4. Publish `TransactionEvaluatedEvent` to Kafka (audit continuity).
-5. Return minimal `EvaluationSummary` (LOW or HIGH severity only).
-
----
-
-### 7. Flyway Migration Strategy
-
-| Version | File | Purpose |
-|---------|------|---------|
-| **V1** | `V1__init_schema.sql` | Tables, PKs, FKs, indexes (`transactions`, `fraud_alerts`) |
-| **V2** | `V2__seed_demo_data.sql` | Demo account `ACC-DEMO-1001` with 11 transactions covering all 3 rule triggers + corresponding `fraud_alerts` |
-| **V3** | `V3__add_fraud_cases_table.sql` | Creates `fraud_cases` with unique transaction ID, review status, timestamps, and account/transaction indexes |
-
-#### Seed Data Coverage:
-- **Clean transactions**: 5 low-risk (GROCERIES, DINING, TRANSPORT, SHOPPING).
-- **HighAmountRule**: 1 × 75,000 ZAR (ELECTRONICS).
-- **TransactionVelocityRule**: 5 × 50 ZAR within 2 minutes (threshold=3).
-- **LocationMismatchRule**: Cape Town → Johannesburg in 5 minutes (threshold=10 min).
-- **Second account**: `ACC-DEMO-1002` with 2 clean transactions.
-
----
-
-### 8. Production Observability
-
-- **Metrics**: `/actuator/prometheus` (JVM, HTTP, DB pool, cache, Kafka, Resilience4j).
-- **Health**: `/actuator/health` (DB, Redis, Kafka, disk space, circuit breaker state).
-- **Logging**: SLF4J structured logs — correlation IDs, rule evaluation, cache hit/miss, Kafka send status.
-- **Tracing Ready**: OpenTelemetry compatible via Micrometer.
-
----
-
-### 9. Security Compliance
-
-- **Multi-stage Dockerfile**: Builder (JDK) → Runtime (JRE, non-root `appuser:appgroup`).
-- **Non-root execution**: `USER appuser` in final image.
-- **No secrets in image**: All credentials via environment variables (`SPRING_DATASOURCE_PASSWORD`, etc.).
-- **Input validation**: Jakarta Bean Validation on all DTOs — RFC 7807 error responses.
-- **Rate limiting**: Resilience4j at service layer + reverse proxy (nginx/Envoy) recommended at edge.
-
-#### Local Keycloak setup and security mode
-
-The application configuration sets `security.enabled=false` by default for the assessment environment. Docker Compose starts Keycloak and imports the starter realm from `config/keycloak/fraud-engine-realm.json`, but the realm, client, and role configuration must be reviewed and completed in the Keycloak Admin Console (`http://localhost:8180/admin`) before enabling application authentication. The local bootstrap account is `admin` / `admin`; these credentials must not be used outside local development.
-
-When security is disabled, the application uses a permit-all filter chain and does not enable method-level authorization, so annotations such as `@PreAuthorize` do not protect routes. This is an intentional setup mode, not a production security posture. After configuring Keycloak, set `SECURITY_ENABLED=true` in the application environment and restart it. Security-enabled mode enforces JWT authentication, requires the `FRAUD_ANALYST` role for fraud-case operations, and keeps the documented public endpoints public. The configured issuer (`SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI`) must match the token issuer and be reachable from the application.
-
----
-
-### 10. Testing Strategy
-
-| Layer | Tool | Scope |
-|-------|------|-------|
-| **Unit** | JUnit 5, Mockito | Rules, mappers, domain logic, controllers (standalone MockMvc) — H2, no Docker |
-| **Integration** | Testcontainers + JUnit 5 | Full stack: PostgreSQL 16, Redis 7, Kafka 7.5 — real Flyway migrations |
-| **Contract** | Springdoc + Postman | OpenAPI spec validation, manual exploratory testing |
-| **Smoke** | `./smoke-test.sh` | End-to-end against running service (evaluation, alerts, asynchronous case lookup/status update, metrics) |
-| **Schema Guard** | `SchemaMigrationDriftTest` | Fails build if entity columns lack Flyway migration |
-
-Run all: `./mvnw test`.
+- Only configured currencies are accepted; the default deployment configures ZAR only.
+- Kafka ingestion complements rather than replaces the synchronous REST API.
+- The outbox gives at-least-once event delivery, not distributed exactly-once semantics.
+- The global in-process rate limiter is a protective service limit, not a per-client quota.
+- Redis caching, automated OpenTelemetry instrumentation, correlation IDs, and a retry annotation are not implemented.

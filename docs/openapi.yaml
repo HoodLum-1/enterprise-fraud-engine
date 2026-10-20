@@ -1,224 +1,247 @@
 openapi: 3.0.3
 info:
-  title: Fraud Engine API
-  description: Enterprise real-time transaction fraud evaluation, fraud alert retrieval, and fraud case management service.
-  version: 1.0.0
-  contact:
-    name: Capitec Connect Team
+  title: Enterprise Fraud Engine API
+  version: 1.1.0
+  description: >
+    JWT-protected transaction evaluation, transaction lookup, fraud-alert retrieval,
+    and fraud-case review. REST evaluation and Kafka transaction ingestion call the
+    same evaluation service. Database-to-Kafka events are published through a
+    PostgreSQL outbox with at-least-once delivery.
 servers:
   - url: http://localhost:8080
-    description: Local Development Server
+    description: Local Compose stack
 
 paths:
   /api/v1/transactions/evaluate:
     post:
-      summary: Evaluate transaction for fraud
-      description: Ingests a new transaction, evaluates it against active fraud rules (high amount, velocity, location anomaly), persists evaluation results and alerts, and publishes an event. A fraud case is created asynchronously by the Kafka consumer and may not be immediately available.
       operationId: evaluateTransaction
+      summary: Evaluate a transaction
+      description: >
+        Evaluates against configured amount, velocity, location, and category rules.
+        Requires TRANSACTION_INGESTOR or FRAUD_ANALYST. A successful response is
+        persisted before it is returned; a fraud case is created asynchronously only
+        if the evaluation triggers a rule.
+      security:
+        - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TransactionRequestDto'
+              $ref: '#/components/schemas/TransactionRequest'
             example:
-              id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
-              accountId: "ACC-998877"
+              id: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+              accountId: ACC-998877
               amount: 55000.00
-              currency: "ZAR"
-              category: "ELECTRONICS"
-              merchantName: "MegaStore Cape Town"
-              location: "Cape Town"
-              timestamp: "2026-10-10T20:00:00Z"
+              currency: ZAR
+              category: ELECTRONICS
+              merchantName: MegaStore Cape Town
+              location: Cape Town
+              timestamp: '2026-10-10T20:00:00Z'
       responses:
         '201':
-          description: Transaction evaluated successfully and persisted.
+          description: Transaction evaluated and persisted.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EvaluationSummaryResponseDto'
-              example:
-                transactionId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
-                accountId: "ACC-998877"
-                totalRiskScore: 40
-                overallSeverity: "HIGH"
-                isFraudulent: true
-                alerts:
-                  - id: "e2b6c935-d227-44f2-95f3-52467d5d2e38"
-                    transactionId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
-                    accountId: "ACC-998877"
-                    ruleName: "HighAmountRule"
-                    riskScore: 40
-                    severity: "HIGH"
-                    reason: "Transaction amount 55000.00 exceeds configured threshold of 50000.00"
-                    flaggedAt: "2026-10-10T20:00:01Z"
+                $ref: '#/components/schemas/EvaluationSummary'
         '400':
-          description: Bad Request - Validation error or malformed payload (RFC 7807 Problem Detail).
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetail'
-              example:
-                type: "about:blank"
-                title: "Bad Request"
-                status: 400
-                detail: "Validation failed for one or more fields."
-                instance: "/api/v1/transactions/evaluate"
-                invalidParams:
-                  amount: "must be greater than 0"
-                  currency: "must match \"^[A-Z]{3}$\""
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
-          description: Conflict - Duplicate transaction ID (Idempotency violation) (RFC 7807 Problem Detail).
+          description: Duplicate transaction ID.
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetail'
-              example:
-                type: "about:blank"
-                title: "Conflict"
-                status: 409
-                detail: "Transaction with ID '3fa85f64-5717-4562-b3fc-2c963f66afa6' already exists."
-                instance: "/api/v1/transactions/evaluate"
-        '500':
-          description: Internal Server Error (RFC 7807 Problem Detail).
+        '429':
+          description: Evaluation rate limit exceeded; honor Retry-After.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              example: 1
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/ProblemDetail'
-              example:
-                type: "about:blank"
-                title: "Internal Server Error"
-                status: 500
-                detail: "An unexpected error occurred while processing the request."
-                instance: "/api/v1/transactions/evaluate"
+        '503':
+          description: Evaluation unavailable; request was not returned as a clean result.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              example: 5
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  /api/v1/transactions/{transactionId}:
+    get:
+      operationId: getTransaction
+      summary: Retrieve a transaction evaluation
+      description: Requires FRAUD_ANALYST or an authenticated owner matching the transaction account.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TransactionId'
+      responses:
+        '200':
+          description: Transaction details and its rule-triggered alerts.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionDetails'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/fraud-alerts/account/{accountId}:
     get:
-      summary: Retrieve fraud alerts for an account
-      description: Fetches all historical fraud alerts triggered for a given account ID, ordered by flagged timestamp descending.
       operationId: getFraudAlertsByAccount
+      summary: Retrieve an account's fraud alerts
+      description: >
+        Requires FRAUD_ANALYST or an authenticated owner whose JWT account claim
+        matches accountId. Results are ordered by flaggedAt descending by default.
       security:
         - BearerAuth: []
       parameters:
         - name: accountId
           in: path
           required: true
-          description: Unique identifier of the bank account
           schema:
             type: string
-          example: "ACC-998877"
+            maxLength: 64
+        - name: severity
+          in: query
+          schema:
+            $ref: '#/components/schemas/Severity'
+        - name: ruleName
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          description: Inclusive lower bound for alert flaggedAt.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: Inclusive upper bound for alert flaggedAt.
+          schema:
+            type: string
+            format: date-time
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - $ref: '#/components/parameters/Sort'
       responses:
         '200':
-          description: List of fraud alerts associated with the account.
+          description: A page of matching alerts (maximum page size 100).
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/FraudAlertResponseDto'
-              example:
-                - id: "e2b6c935-d227-44f2-95f3-52467d5d2e38"
-                  transactionId: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
-                  accountId: "ACC-998877"
-                  ruleName: "HighAmountRule"
-                  riskScore: 40
-                  severity: "HIGH"
-                  reason: "Transaction amount 55000.00 exceeds configured threshold of 50000.00"
-                  flaggedAt: "2026-10-10T20:00:01Z"
+                $ref: '#/components/schemas/FraudAlertPage'
         '400':
-          description: Bad Request (RFC 7807 Problem Detail).
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetail'
-        '500':
-          description: Internal Server Error (RFC 7807 Problem Detail).
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ProblemDetail'
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/fraud-cases:
     get:
-      summary: Retrieve all fraud cases
-      description: Returns all fraud cases created by the asynchronous Kafka event consumer.
-      operationId: getAllFraudCases
-      security:
-        - BearerAuth: []
-      responses:
-        '200':
-          description: All fraud cases.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/FraudCase'
-
-  /api/v1/fraud-cases/transaction/{transactionId}:
-    get:
-      summary: Retrieve a fraud case by transaction ID
-      description: Returns the case associated with a transaction UUID. A case is created asynchronously after its evaluation event is consumed.
-      operationId: getFraudCaseByTransactionId
+      operationId: getFraudCases
+      summary: Retrieve fraud cases
+      description: Requires FRAUD_ANALYST. Only evaluations that trigger a fraud rule create cases.
       security:
         - BearerAuth: []
       parameters:
-        - name: transactionId
-          in: path
-          required: true
-          description: Transaction UUID
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - name: sort
+          in: query
+          description: Spring Data sort expression; defaults to createdAt,desc.
           schema:
-            type: string
-            format: uuid
-          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
       responses:
         '200':
-          description: Fraud case found.
+          description: A page of fraud cases (maximum page size 100).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudCasePage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/fraud-cases/transaction/{transactionId}:
+    get:
+      operationId: getFraudCaseByTransaction
+      summary: Retrieve a case by transaction ID
+      description: Requires FRAUD_ANALYST. Case creation is asynchronous after evaluation.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TransactionId'
+      responses:
+        '200':
+          description: Fraud case details.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/FraudCase'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: No fraud case exists for this transaction ID.
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/fraud-cases/{transactionId}/status:
     patch:
-      summary: Update fraud case status
-      description: Updates the review status of an existing fraud case.
       operationId: updateFraudCaseStatus
+      summary: Update a fraud case status
+      description: >
+        Requires FRAUD_ANALYST. The authenticated principal is recorded as updatedBy.
+        Allowed transitions are PENDING_REVIEW to CONFIRMED_FRAUD, FALSE_POSITIVE,
+        or RESOLVED; CONFIRMED_FRAUD or FALSE_POSITIVE to RESOLVED. RESOLVED is terminal.
       security:
         - BearerAuth: []
       parameters:
-        - name: transactionId
-          in: path
-          required: true
-          description: Transaction UUID associated with the fraud case
-          schema:
-            type: string
-            format: uuid
+        - $ref: '#/components/parameters/TransactionId'
         - name: status
           in: query
           required: true
-          description: New fraud case status
           schema:
-            type: string
-            enum:
-              - PENDING_REVIEW
-              - CONFIRMED_FRAUD
-              - FALSE_POSITIVE
-              - RESOLVED
-          example: CONFIRMED_FRAUD
+            $ref: '#/components/schemas/CaseStatus'
       responses:
         '200':
-          description: Status updated successfully.
+          description: Updated fraud case.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/FraudCase'
         '400':
-          description: Unsupported status value.
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: No fraud case exists for this transaction ID.
+          $ref: '#/components/responses/NotFound'
 
 components:
   securitySchemes:
@@ -226,127 +249,179 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  parameters:
+    TransactionId:
+      name: transactionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Page:
+      name: page
+      in: query
+      description: Zero-based page index.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    Size:
+      name: size
+      in: query
+      description: Requested page size, capped by the server at 100.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Sort:
+      name: sort
+      in: query
+      description: Spring Data sort expression, for example flaggedAt,desc.
+      schema:
+        type: array
+        items:
+          type: string
+      style: form
+      explode: true
+  responses:
+    BadRequest:
+      description: Invalid request, unsupported configured currency, or invalid filter.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    Forbidden:
+      description: Authenticated principal lacks the required role or account ownership.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    NotFound:
+      description: Requested transaction or fraud case was not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
   schemas:
-    TransactionRequestDto:
+    TransactionRequest:
       type: object
-      required:
-        - id
-        - accountId
-        - amount
-        - currency
-        - category
-        - timestamp
+      required: [id, accountId, amount, currency, category, timestamp]
       properties:
         id:
           type: string
           format: uuid
-          description: Unique transaction identifier (UUID v4)
-          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
         accountId:
           type: string
           maxLength: 64
-          description: Account identifier
-          example: "ACC-998877"
         amount:
           type: number
-          format: double
           minimum: 0.01
-          description: Monetary amount (positive, up to 2 decimal places)
-          example: 55000.00
         currency:
           type: string
           pattern: '^[A-Z]{3}$'
-          description: ISO 4217 3-letter currency code
-          example: "ZAR"
+          description: Only currencies with configured thresholds are accepted (ZAR by default).
+          example: ZAR
         category:
           type: string
-          description: Category of the transaction (e.g. GROCERIES, ELECTRONICS, TRANSFER)
-          example: "ELECTRONICS"
+          example: ELECTRONICS
         merchantName:
           type: string
           nullable: true
           maxLength: 100
-          description: Name of the merchant
-          example: "MegaStore Cape Town"
         location:
           type: string
           nullable: true
           maxLength: 100
-          description: Location / city of transaction
-          example: "Cape Town"
         timestamp:
           type: string
           format: date-time
-          description: ISO-8601 transaction timestamp (must be in past or present)
-          example: "2026-10-10T20:00:00Z"
-
-    EvaluationSummaryResponseDto:
+          description: Transaction event time; future timestamps are invalid.
+    EvaluationSummary:
       type: object
-      required:
-        - transactionId
-        - accountId
-        - totalRiskScore
-        - overallSeverity
-        - isFraudulent
-        - alerts
+      required: [transactionId, accountId, totalRiskScore, overallSeverity, isFraudulent, alerts]
       properties:
         transactionId:
           type: string
           format: uuid
-          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
         accountId:
           type: string
-          example: "ACC-998877"
         totalRiskScore:
           type: integer
-          description: Sum of risk scores from all triggered rules
-          example: 40
         overallSeverity:
           $ref: '#/components/schemas/Severity'
         isFraudulent:
           type: boolean
-          description: Whether any fraud rule was triggered
-          example: true
         alerts:
           type: array
           items:
-            $ref: '#/components/schemas/FraudAlertResponseDto'
-
-    FraudCase:
+            $ref: '#/components/schemas/FraudAlert'
+    TransactionDetails:
+      allOf:
+        - $ref: '#/components/schemas/EvaluationSummary'
+        - type: object
+          properties:
+            amount:
+              type: number
+              format: double
+            currency:
+              type: string
+            category:
+              type: string
+            merchantName:
+              type: string
+              nullable: true
+            location:
+              type: string
+              nullable: true
+            timestamp:
+              type: string
+              format: date-time
+    FraudAlert:
       type: object
-      required:
-        - id
-        - transactionId
-        - accountId
-        - totalRiskScore
-        - overallSeverity
-        - status
-        - createdAt
       properties:
         id:
           type: string
           format: uuid
-          description: Unique fraud case identifier
         transactionId:
           type: string
           format: uuid
-          description: Unique transaction associated with this case
         accountId:
           type: string
-          maxLength: 64
+        ruleName:
+          type: string
+        riskScore:
+          type: integer
+        severity:
+          $ref: '#/components/schemas/Severity'
+        reason:
+          type: string
+        flaggedAt:
+          type: string
+          format: date-time
+    FraudCase:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        transactionId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
         totalRiskScore:
           type: integer
-          minimum: 0
         overallSeverity:
           $ref: '#/components/schemas/Severity'
         status:
-          type: string
-          maxLength: 30
-          enum:
-            - PENDING_REVIEW
-            - CONFIRMED_FRAUD
-            - FALSE_POSITIVE
-            - RESOLVED
+          $ref: '#/components/schemas/CaseStatus'
         createdAt:
           type: string
           format: date-time
@@ -354,86 +429,84 @@ components:
           type: string
           format: date-time
           nullable: true
-
-    FraudAlertResponseDto:
-      type: object
-      required:
-        - id
-        - transactionId
-        - accountId
-        - ruleName
-        - riskScore
-        - severity
-        - reason
-        - flaggedAt
-      properties:
-        id:
+        updatedBy:
           type: string
-          format: uuid
-          example: "e2b6c935-d227-44f2-95f3-52467d5d2e38"
-        transactionId:
-          type: string
-          format: uuid
-          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
-        accountId:
-          type: string
-          example: "ACC-998877"
-        ruleName:
-          type: string
-          example: "HighAmountRule"
-        riskScore:
+          nullable: true
+        version:
           type: integer
-          example: 40
-        severity:
-          $ref: '#/components/schemas/Severity'
-        reason:
-          type: string
-          example: "Transaction amount 55000.00 exceeds configured threshold of 50000.00"
-        flaggedAt:
-          type: string
-          format: date-time
-          example: "2026-10-10T20:00:01Z"
-
+          format: int64
+    FraudAlertPage:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/FraudAlert'
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+        size:
+          type: integer
+        number:
+          type: integer
+        first:
+          type: boolean
+        last:
+          type: boolean
+        numberOfElements:
+          type: integer
+        empty:
+          type: boolean
+    FraudCasePage:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/FraudCase'
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+        size:
+          type: integer
+        number:
+          type: integer
+        first:
+          type: boolean
+        last:
+          type: boolean
+        numberOfElements:
+          type: integer
+        empty:
+          type: boolean
     Severity:
       type: string
-      enum:
-        - LOW
-        - MEDIUM
-        - HIGH
-        - CRITICAL
-      example: "HIGH"
-
+      enum: [LOW, MEDIUM, HIGH, CRITICAL]
+    CaseStatus:
+      type: string
+      enum: [PENDING_REVIEW, CONFIRMED_FRAUD, FALSE_POSITIVE, RESOLVED]
     ProblemDetail:
       type: object
-      required:
-        - type
-        - title
-        - status
       properties:
         type:
           type: string
           format: uri
-          description: A URI reference identifying the problem type
-          example: "about:blank"
         title:
           type: string
-          description: A short, human-readable summary of the problem type
-          example: "Bad Request"
         status:
           type: integer
-          description: The HTTP status code generated by the origin server
-          example: 400
         detail:
           type: string
-          description: A human-readable explanation specific to this occurrence of the problem
-          example: "Validation failed for one or more fields."
         instance:
           type: string
-          format: uri-reference
-          description: A URI reference that identifies the specific occurrence of the problem
-          example: "/api/v1/transactions/evaluate"
+        timestamp:
+          type: string
+          format: date-time
         invalidParams:
           type: object
           additionalProperties:
             type: string
-          description: Map of field names to validation error messages (if applicable)

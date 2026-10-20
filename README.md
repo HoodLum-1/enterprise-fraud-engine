@@ -1,318 +1,120 @@
-# 🛡️ Enterprise Fraud Rule Engine Service
+# Enterprise Fraud Engine
 
-An enterprise-grade, real-time transaction fraud evaluation and audit service built for high-throughput financial environments. Designed with strict **Hexagonal Architecture (Ports & Adapters)** and **Domain-Driven Design (DDD)** principles, this service evaluates incoming transactions against configurable fraud rules, guarantees idempotency via client-assigned UUIDs, and provides comprehensive immutable audit trails.
+Java 21 / Spring Boot service for synchronous transaction evaluation and asynchronous transaction-event ingestion. Evaluation results and alerts are stored in PostgreSQL; Kafka events are delivered through a transactional database outbox. REST APIs are secured with JWT bearer tokens by default.
 
----
+## Capabilities
 
-## 🛠️ Languages & Tools Used
-* **Java 21** (Virtual Threads & Record-based immutability)
-* **Spring Boot 3** (WebMVC, Data JPA, Validation, Actuator, AOP)
-* **PostgreSQL 16 & Flyway** (Relational storage with optimized sliding-window composite indexes)
-* **Redis 7** (Caching for sub-50ms historical lookups)
-* **Apache Kafka 7.5** (Event streaming for fraud alerts)
-* **Resilience4j** (Circuit Breaker, Rate Limiter, Retry)
-* **Docker & Docker Compose** (Containerization & multi-stage security hardening)
-* **Testcontainers & JUnit 5 / Mockito** (Real-database integration testing)
-* **Postman & OpenAPI 3.0 / Swagger UI** (Interactive API testing and documentation)
+- Ordered, configurable rules: high amount, transaction velocity, recent location mismatch, and high-risk merchant category.
+- Rule history is read using the incoming event time, before saving the incoming transaction; the current transaction is excluded from its own history.
+- Amount thresholds are currency-specific. The default policy supports ZAR with a threshold of ZAR 50,000; unconfigured currencies are rejected rather than compared as if they were ZAR.
+- Velocity counts the incoming transaction plus earlier transactions in the configured window. With the default threshold of 3, 3 total transactions do not trigger and 4 do.
+- Gambling and crypto categories add 30 risk points at MEDIUM severity by default.
+- Fraud cases and the flagged-notification placeholder log are created only for evaluations that trigger a rule. No external customer-notification provider is integrated. Freeze commands are policy-gated, recorded in `freeze_audit`, and published as typed events.
+- Evaluation and freeze events use a PostgreSQL outbox. Publishing is at-least-once; consumers should use the event ID for deduplication.
+- REST and Kafka ingestion are both supported. Redis is not used.
+- Alert and case retrieval are pageable (maximum page size 100); alerts also support severity, rule-name, and event-time filters.
 
----
+## Run locally
 
-## 🤓 Prerequisites & Assumptions
-To build, run, and test this project locally, ensure you have the following installed:
-* **Java 21 Development Kit (JDK)**
-* **Docker & Docker Compose** (running and available in your CLI)
-* **Postman** (optional, for visual API exploration)
-* **cURL & Bash** (for executing automated smoke test scripts)
-* **Make** (optional, for convenience targets)
-
----
-
-## 🚀 Starting the Application
-
-### Option A: Run the Dockerfile-built application container (Recommended)
-
-Start the supporting services, build the application image from the repository's multi-stage `Dockerfile`, then run it on the same Compose network:
+Requirements: Java 21, Docker with the Compose plugin, and `curl`. Compose starts PostgreSQL, Kafka, Keycloak, Kafka UI, and the application.
 
 ```bash
-# Start dependencies (Compose project name keeps the network name predictable)
-docker compose -p fraud-engine up -d postgres redis zookeeper kafka kafka-ui keycloak
-
-# Build the application image using the Dockerfile
-docker build -t fraud-engine .
-
-# Run the app in Docker; service names resolve on the Compose network
-docker run --rm --name fraud-engine \
-  --network fraud-engine_default \
-  -p 8080:8080 \
-  -e SPRING_DATA_REDIS_HOST=redis \
-  -e SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:29092 \
-  fraud-engine
-```
-
-> 💡 **Troubleshooting Network Errors (`UnknownHostException: postgres`)**
->
-> Depending on your operating system and Docker version, Docker Compose may prefix network names differently (e.g., `fraud-engine_fraud-engine_default` instead of `fraud-engine_default`).
->
-> If you encounter a database connection error during startup, run `docker network ls` to check your exact network name, and update the `--network` flag in the `docker run` command above to match it.
-
-The PostgreSQL URL remains the application default, `jdbc:postgresql://postgres:5432/fraud_db`; Docker resolves `postgres` on the shared network. The Redis and Kafka environment variables point the app container to their Compose service names. The container uses the same security setting as the packaged application (`security.enabled=false` by default); see [Authentication](#authentication) before enabling security.
-
-### Option B: Quick Start with `run.sh`
-
-The `run.sh` script boots all infrastructure, builds the app, and starts the service with health checks:
-
-```bash
+docker compose up --build -d
+# or
 ./run.sh
 ```
 
-This will:
-1. Start PostgreSQL, Redis, Kafka, Zookeeper, and Kafka UI via Docker Compose
-2. Wait for all health checks to pass
-3. Build the JAR with `./mvnw clean package -DskipTests`
-4. Start the application and verify `/actuator/health`
-5. Print all available endpoints
+The application uses Flyway migrations and validates the database schema. The `postgres_data` volume persists across `docker compose down`; use `docker compose down -v` only when you intentionally want to delete local database data.
+If local port 5432 is already occupied, choose another host port, for example `POSTGRES_PORT=55432 docker compose up --build -d`; containers still connect to PostgreSQL on port 5432.
 
-The script also starts Keycloak. Application authentication is **disabled by default** (`security.enabled=false`) until Keycloak has been configured for this environment. Configure and verify the `fraud-engine` realm, client, and roles in the Keycloak Admin Console at `http://localhost:8180/admin`, then restart the application with `SECURITY_ENABLED=true` to enforce JWT authentication. Until then, do not treat protected API routes as access-controlled.
+| Service | Local address |
+|---|---|
+| Fraud Engine | http://localhost:8080 |
+| Swagger UI / OpenAPI | http://localhost:8080/swagger-ui.html / `/v3/api-docs` |
+| Health (public) / Prometheus (authenticated) | http://localhost:8080/actuator/health / `/actuator/prometheus` |
+| Keycloak | http://localhost:8180 |
+| Kafka UI | http://localhost:8085 |
+| PostgreSQL | `localhost:5432` (`fraud_db`, local credentials in Compose) |
 
-### Option C: Using Makefile Targets
+Security is enabled by default. Compose imports a local Keycloak realm. Use a configured token with the appropriate role; the local Keycloak bootstrap credentials and realm are development-only and must not be reused in deployed environments. For isolated local development without JWT, run with the `dev` profile (which disables security and enables development-only seed data):
+
 ```bash
-# Start all infrastructure (PostgreSQL, Redis, Kafka, Kafka UI)
-make up
-
-# Build the application
-make build
-
-# Start the application (after 'make up')
-make run
-
-# Or do it all in one:
-make build && make run
+SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 ```
 
-### Option D: Manual Docker Compose
+Start only the dependencies first if running the application from Maven:
+
 ```bash
-# Start full stack
-docker-compose up -d
-
-# Or just the database for local development
-docker-compose up -d postgres redis kafka
-```
-
-### Option E: Local Development with Maven
-```bash
-# Start backing services only
-docker-compose up -d postgres redis kafka
-
-# Run Spring Boot app
+docker compose up -d postgres kafka keycloak
+SPRING_PROFILES_ACTIVE=dev \
+SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/fraud_db \
+SPRING_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 \
 ./mvnw spring-boot:run
 ```
 
----
+Do not enable the `dev` profile in a deployed environment.
 
-## 📍 Service Endpoints
+## API and authorization
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| **Fraud Engine API** | `http://localhost:8080` | Main REST API |
-| **Swagger UI** | `http://localhost:8080/swagger-ui.html` | Interactive API docs |
-| **OpenAPI Spec** | `http://localhost:8080/v3/api-docs` | OpenAPI 3.0 JSON |
-| **Actuator Health** | `http://localhost:8080/actuator/health` | Health checks |
-| **Prometheus Metrics** | `http://localhost:8080/actuator/prometheus` | Metrics endpoint |
-| **Fraud Cases** | `http://localhost:8080/api/v1/fraud-cases` | List, look up, and update fraud-case review status |
-| **Keycloak** | `http://localhost:8180` | Local OAuth2 issuer (`fraud-engine` realm) |
-| **Kafka UI** | `http://localhost:8085` | Kafka topic browser |
-| **PostgreSQL** | `localhost:5432` | Database (user: postgres, pass: postgres) |
-| **Redis** | `localhost:6379` | Cache |
+| Method | Path | Access / behavior |
+|---|---|---|
+| `POST` | `/api/v1/transactions/evaluate` | `TRANSACTION_INGESTOR` or `FRAUD_ANALYST`; evaluates and persists a transaction (`201`) |
+| `GET` | `/api/v1/transactions/{transactionId}` | Account owner or analyst; returns transaction details and alerts |
+| `GET` | `/api/v1/fraud-alerts/account/{accountId}` | Account owner or analyst; supports `severity`, `ruleName`, `from`, `to`, `page`, `size`, and `sort` |
+| `GET` | `/api/v1/fraud-cases` | `FRAUD_ANALYST`; pageable case list |
+| `GET` | `/api/v1/fraud-cases/transaction/{transactionId}` | `FRAUD_ANALYST`; retrieves the case associated with a transaction |
+| `PATCH` | `/api/v1/fraud-cases/{transactionId}/status?status=...` | `FRAUD_ANALYST`; case-status update records the actor and uses optimistic locking |
 
----
+JWT account ownership is checked against the account claim. Public endpoints are limited to health, Swagger UI, and OpenAPI documentation. Evaluation errors use RFC 7807 problem details: `400` for invalid/unsupported input, `401`/`403` for authentication/authorization, `409` for duplicate transaction IDs, `429` with `Retry-After` for rate limiting, and `503` with `Retry-After` when evaluation is unavailable.
 
-## 🧪 Testing & Verification
+### Kafka contracts
 
-### 1. Unauthenticated Smoke Test
+- Input topic (default `transactions-topic`): a JSON transaction request with `id`, `accountId`, `amount`, `currency`, `category`, `merchantName`, `location`, and ISO-8601 `timestamp`. Kafka input is processed by the same evaluation service as REST.
+- Evaluation outbox output topic (default `fraud-alerts-topic`): typed `TRANSACTION_EVALUATED` events; the fraud-case consumer ignores clean evaluations.
+- Freeze outbox output topic (default `account-actions-topic`): typed `ACCOUNT_FREEZE` commands, created only when the configured freeze policy is met and an audit row is written.
 
-Use `smoke-test.sh` only when application security is disabled (`security.enabled=false`, the default assessment setup):
+Topic names, rule settings, rate limiting, and freeze policy are configurable in `src/main/resources/application.yml`.
+
+## Tests and developer tools
 
 ```bash
-./smoke-test.sh
+./mvnw test
+./mvnw verify
+docker compose config
 ```
-The script verifies that an unauthenticated request can access a protected endpoint before running its checks. It exits with guidance if security is enabled. Checks include low-risk evaluation, high-amount rule triggering, idempotency (409), validation (400), alert retrieval, asynchronous fraud-case lookup and status update, and Prometheus metrics.
 
-### 2. Authenticated Smoke Test
+Unit tests use H2. Integration tests use Testcontainers PostgreSQL and Kafka with Flyway enabled; Docker must be available. `application-integration.yml` selects this integration configuration.
 
-Use `smoke-test-with-auth.sh` only after Keycloak has been configured and the application restarted with `SECURITY_ENABLED=true`. The script checks that an unauthenticated request is rejected, obtains a token, then tests the protected API routes.
-
-Set the analyst username and password for your configured Keycloak realm in the environment. The script contains only `INSERT_CREDS_HERE<>` placeholders and exits unless you provide credentials:
+Authenticated smoke checks require Keycloak analyst credentials:
 
 ```bash
-KEYCLOAK_USERNAME='INSERT_CREDS_HERE<>' \
-KEYCLOAK_PASSWORD='INSERT_CREDS_HERE<>' \
+KEYCLOAK_USERNAME='your-analyst-user' \
+KEYCLOAK_PASSWORD='your-password' \
 ./smoke-test-with-auth.sh
 ```
 
-Replace both placeholder values with credentials for an account with the `FRAUD_ANALYST` realm role. Do not commit real credentials. `BASE_URL` and `KEYCLOAK_URL` can be set to target non-default addresses.
-
-### 3. Load Test
-
-Start the application and its backing services first, then run:
+`smoke-test.sh` is for a separately started `dev`-profile instance. The load test needs an authorized JWT when security is enabled:
 
 ```bash
-./load-test.sh
+AUTH_TOKEN='eyJ...' TOTAL_REQUESTS=100 CONCURRENCY=10 ./load-test.sh
 ```
 
-The script sends 200 unique transaction-evaluation requests with up to 20 requests in flight, then reports duration, throughput, status-code counts, and the `201 Created` success rate. It requires `curl`, `bc`, and `python3` (or `uuidgen` for UUID generation).
+The load test is for development verification, not capacity certification; the service rate limiter is process-local and is not a replacement for gateway-level per-client limits.
 
-Override the request count, concurrency, or target URL with environment variables:
+## Configuration and data
 
-```bash
-TOTAL_REQUESTS=500 CONCURRENCY=50 ./load-test.sh
-BASE_URL=http://localhost:8081 ./load-test.sh
-```
+- Main configuration: `src/main/resources/application.yml`.
+- Local-only profile and seed: `application-dev.yml` and `src/main/resources/db/dev/`.
+- Versioned schema changes: `src/main/resources/db/migration/`. The historical V2 demo-data migration remains immutable; V5 removes those rows, and dev-only data is seeded only when the `dev` profile is active.
+- Integration tests use Flyway against PostgreSQL and `ddl-auto: validate`; unit tests use H2 with Flyway disabled and `create-drop`.
+- Detailed component boundaries, rule semantics, transaction/outbox behavior, and operational trade-offs are in [docs/architecture.md](docs/architecture.md).
+- The maintained API contract is [docs/openapi.yaml](docs/openapi.yaml); an importable Postman collection is in [docs/postman](docs/postman/).
 
-Available settings: `TOTAL_REQUESTS`, `CONCURRENCY`, `BASE_URL`, and `API_ENDPOINT`. Use moderate settings for local runs and monitor application, database, Redis, and Kafka health; the script creates persistent transactions and is intended for development/testing, not production benchmarking.
+## Design decisions and known boundaries
 
-### 4. Postman Collection
-Import `docs/postman/fraud-engine.postman_collection.json` into Postman. The collection includes:
-- Pre-configured environment variables
-- Auto-generated UUIDs and timestamps via pre-request scripts
-- Requests covering clean/high-amount evaluations, duplicate and validation errors, alerts, fraud cases, and actuator endpoints
-- Fraud case lookup/status requests; cases appear after asynchronous Kafka processing
-
-### Fraud Case Management
-
-Every evaluated transaction publishes a `TransactionEvaluatedEvent` to Kafka. The Kafka consumer creates a fraud case asynchronously with status `PENDING_REVIEW`, so allow a short delay after evaluation before looking it up. Fraud cases are recorded separately from rule-triggered fraud alerts.
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/v1/fraud-cases` | List all cases |
-| `GET` | `/api/v1/fraud-cases/transaction/{transactionId}` | Find a case by transaction UUID (`404` if not found) |
-| `PATCH` | `/api/v1/fraud-cases/{transactionId}/status?status={status}` | Set status to `PENDING_REVIEW`, `CONFIRMED_FRAUD`, `FALSE_POSITIVE`, or `RESOLVED` |
-
-Case responses include the case and transaction IDs, account ID, total risk score, overall severity, status, and creation/update timestamps. Critical events (severity `CRITICAL` or risk score at least 80) also result in an `ACCOUNT_FREEZE` command being published to Kafka.
-
-### Authentication
-
-For this assessment, authentication is **disabled by default** in `src/main/resources/application.yml` (`security.enabled: false`). Keycloak is started by Docker Compose, but the application is left open until Keycloak has been configured through its Admin Console. In this mode, Spring Security's URL and method-level authorization checks are both disabled; do not expose the service as a secured API while this setting is off.
-
-1. Start the stack with `./run.sh` or `docker compose up -d`.
-2. Open the Keycloak Admin Console at `http://localhost:8180/admin` (local bootstrap credentials are `admin` / `admin`).
-3. Configure or verify the `fraud-engine` realm, the resource-server client, and the `FRAUD_ANALYST` role. Compose imports the realm definition from `config/keycloak/fraud-engine-realm.json` as a starting point.
-4. Restart the application with `SECURITY_ENABLED=true` in its environment. For `run.sh`, for example:
-
-```bash
-SECURITY_ENABLED=true ./run.sh
-```
-
-With security enabled, fraud-case routes require a Keycloak bearer token with the `FRAUD_ANALYST` realm role, fraud-alert routes require a valid JWT, and transaction evaluation, health, Prometheus, and Swagger/OpenAPI remain public. Missing or invalid authentication returns `401`; an authenticated caller without the required role receives `403`. Ensure the configured JWT issuer matches `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI` and is reachable by the application. The local realm and its development accounts are for testing only; replace them before deployment. Use the authenticated smoke-test instructions above to provide your configured analyst credentials without storing them in the repository.
-
-### 5. Unit & Integration Tests (Testcontainers)
-```bash
-# All unit and integration tests
-./mvnw test
-
-# Or via Make
-make test
-```
-- **Unit tests**: H2 in-memory DB, no Docker required
-- **Integration tests**: Testcontainers spin up real PostgreSQL 16, Redis 7, Kafka 7.5
-
-### 6. Makefile Convenience Targets
-```bash
-make help      # Show all targets
-make up        # Start infrastructure
-make down      # Stop infrastructure
-make build     # Build JAR (skip tests)
-make test      # Run all tests
-make smoke     # Run smoke test
-make clean     # Clean build + Docker volumes
-make logs      # Tail container logs
-```
-
----
-
-## 🏗️ Production Architecture
-
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   Client    │────▶│  Spring MVC │────▶│  PostgreSQL │
-│  (HTTP)     │     │  Controller │     │  (Flyway)   │
-└─────────────┘     └──────┬──────┘     └─────────────┘
-                           │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-        ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │  Redis   │ │  Kafka   │ │Resilience│
-        │  Cache   │ │ Producer │ │4j (CB/RL)│
-        └──────────┘ └──────────┘ └──────────┘
-```
-
-### Core Components
-| Layer | Package | Responsibility |
-|-------|---------|----------------|
-| **Inbound** | `api.controller` | REST endpoints, validation, RFC 7807 errors |
-| **Domain** | `domain.model`, `engine.rule` | Immutable records, fraud rules (Chain of Responsibility) |
-| **Application** | `engine.service` | Orchestration, `@Transactional`, circuit breaker, rate limiter |
-| **Outbound** | `infrastructure.*` | JPA, Redis cache, Kafka producer, mappers |
-
----
-
-## ⚙️ Configuration
-
-All configuration via `src/main/resources/application.yml` with environment variable overrides:
-
-```yaml
-spring:
-  datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fraud_db}
-    username: ${SPRING_DATASOURCE_USERNAME:postgres}
-    password: ${SPRING_DATASOURCE_PASSWORD:postgres}
-  data:
-    redis:
-      host: ${SPRING_DATA_REDIS_HOST:localhost}
-      port: ${SPRING_DATA_REDIS_PORT:6379}
-  kafka:
-    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-```
-
-### Fraud Rules (configurable)
-| Rule | Threshold | Risk Score | Severity |
-|------|-----------|------------|----------|
-| HighAmountRule | 50,000 | 40 | HIGH |
-| TransactionVelocityRule | 3 tx / 2min | 50 | CRITICAL |
-| LocationMismatchRule | 10 min gap | 60 | CRITICAL |
-
----
-
-## 🔄 Flyway Migrations
-- `V1__init_schema.sql` — Tables, indexes, constraints
-- `V2__seed_demo_data.sql` — Demo account `ACC-DEMO-1001` with sample transactions covering all 3 rule triggers
-- `V3__add_fraud_cases_table.sql` — Fraud-case review records and indexes
-
----
-
-## 🐳 Docker
-
-### Multi-stage Dockerfile
-1. **Builder**: `eclipse-temurin:21-jdk-jammy` — compiles with Maven wrapper
-2. **Runtime**: `eclipse-temurin:21-jre-jammy` — non-root `appuser`, minimal attack surface
-
-### compose.yaml Services
-| Service | Image | Port | Health Check |
-|---------|-------|------|--------------|
-| postgres | `postgres:16-alpine` | 5432 | `pg_isready` |
-| redis | `redis:7-alpine` | 6379 | `redis-cli ping` |
-| zookeeper | `confluentinc/cp-zookeeper:7.5.0` | 2181 | — |
-| kafka | `confluentinc/cp-kafka:7.5.0` | 9092 | broker API |
-| kafka-ui | `provectuslabs/kafka-ui:latest` | 8085 | — |
-
----
-
-## 📚 Architectural Deep Dive
-
-See [`docs/architecture.md`](docs/architecture.md) for detailed documentation on:
-- Hexagonal Architecture layers & boundaries
-- Chain of Responsibility fraud rule pattern
-- Transactional boundaries & idempotency
-- Redis caching strategy
-- Kafka event publishing
-- Resilience4j fault tolerance
-- Database indexing & concurrency
+- The outbox prevents a successful database commit from silently losing its corresponding Kafka event, but delivery is at-least-once rather than exactly-once.
+- REST remains available alongside Kafka ingestion for synchronous callers and operational testing.
+- Currency policy is intentionally limited to explicitly configured thresholds; add a currency threshold before accepting another currency.
+- The in-process rate limiter protects an instance, not a distributed fleet. Production deployments should enforce tenant/client quotas at an API gateway.
+- No Redis history cache, retry annotation, virtual-thread mode, distributed tracing, or correlation-ID implementation is included.
+- Local Compose credentials, Keycloak development accounts, and sample data are for development only.
