@@ -50,18 +50,19 @@ public class TransactionVelocityRule implements FraudRule {
         Instant currentTimestamp = currentTransaction.timestamp();
         Instant windowStart = currentTimestamp.minus(config.getWindow());
 
-        long count = accountHistory.stream()
+        long previousTransactionCount = accountHistory.stream()
             .filter(tx -> tx != null && tx.timestamp() != null)
             .filter(tx -> !tx.timestamp().isBefore(windowStart) && !tx.timestamp().isAfter(currentTimestamp))
             .count();
 
-        if (count > config.getThreshold()) {
+        long totalTransactionCount = previousTransactionCount + 1;
+        if (totalTransactionCount > config.getThreshold()) {
             return new RuleEvaluationResult(
                 RULE_NAME,
                 true,
                 config.getRiskScore(),
                 config.getSeverity(),
-                "Potential velocity fraud: " + count + " transactions occurred within the last " + config.getWindow().toMinutes() + " minutes"
+                "Potential velocity fraud: " + totalTransactionCount + " transactions occurred within the last " + config.getWindow().toMinutes() + " minutes"
             );
         }
 

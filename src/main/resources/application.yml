@@ -5,7 +5,7 @@ spring:
     date-format: "yyyy-MM-dd'T'HH:mm:ss.SSSXXX"
     time-zone: UTC
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres:5432/fraud_db}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fraud_db}
     username: ${SPRING_DATASOURCE_USERNAME:postgres}
     password: ${SPRING_DATASOURCE_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
@@ -69,9 +69,15 @@ fraud:
     rules:
       high-amount:
         enabled: true
-        threshold: 50000.00
+        thresholds:
+          ZAR: 50000.00
         risk-score: 40
         severity: HIGH
+      category-risk:
+        enabled: true
+        categories: [GAMBLING, CRYPTO]
+        risk-score: 30
+        severity: MEDIUM
       velocity:
         enabled: true
         threshold: 3

@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Configuration;
 
 import java.math.BigDecimal;
 import java.time.Duration;
+import java.util.Map;
 
 @Data
 @Configuration
@@ -20,6 +21,9 @@ public class FraudEngineProperties {
     @NestedConfigurationProperty
     private Rules rules = new Rules();
 
+    @NestedConfigurationProperty
+    private FreezePolicy freezePolicy = new FreezePolicy();
+
     @Data
     public static class Evaluation {
         private Duration historyWindow = Duration.ofHours(24);
@@ -30,14 +34,23 @@ public class FraudEngineProperties {
         private HighAmount highAmount = new HighAmount();
         private Velocity velocity = new Velocity();
         private LocationMismatch locationMismatch = new LocationMismatch();
+        private CategoryRisk categoryRisk = new CategoryRisk();
     }
 
     @Data
     public static class HighAmount {
         private boolean enabled = true;
-        private BigDecimal threshold = new BigDecimal("50000.00");
+        private Map<String, BigDecimal> thresholds = Map.of("ZAR", new BigDecimal("50000.00"));
         private int riskScore = 40;
         private Severity severity = Severity.HIGH;
+    }
+
+    @Data
+    public static class CategoryRisk {
+        private boolean enabled = true;
+        private java.util.Set<String> categories = java.util.Set.of("GAMBLING", "CRYPTO");
+        private int riskScore = 30;
+        private Severity severity = Severity.MEDIUM;
     }
 
     @Data
@@ -55,5 +68,12 @@ public class FraudEngineProperties {
         private Duration timeGapThreshold = Duration.ofMinutes(10);
         private int riskScore = 60;
         private Severity severity = Severity.CRITICAL;
+    }
+
+    @Data
+    public static class FreezePolicy {
+        private boolean enabled = true;
+        private int minimumRiskScore = 80;
+        private Severity minimumSeverity = Severity.CRITICAL;
     }
 }

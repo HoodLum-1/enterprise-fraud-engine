@@ -3,6 +3,7 @@ package com.capitec.connect.fraudengine.engine.rule;
 import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.domain.model.Transaction;
+import com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException;
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -43,11 +44,21 @@ public class HighAmountRule implements FraudRule {
     @Override
     public RuleEvaluationResult evaluate(Transaction currentTransaction, List<Transaction> accountHistory) {
         FraudEngineProperties.HighAmount config = properties.getRules().getHighAmount();
-        BigDecimal threshold = config.getThreshold();
+        if (currentTransaction == null || currentTransaction.amount() == null) {
+            return new RuleEvaluationResult(
+                RULE_NAME, false, 0, Severity.LOW, "Transaction amount is unavailable"
+            );
+        }
+
+        String currency = currentTransaction.currency().toUpperCase(java.util.Locale.ROOT);
+        BigDecimal threshold = config.getThresholds().get(currency);
+        if (threshold == null) {
+            throw new UnsupportedCurrencyException(currency);
+        }
         int riskScore = config.getRiskScore();
         Severity severity = config.getSeverity();
 
-        if (currentTransaction != null && currentTransaction.amount() != null && currentTransaction.amount().compareTo(threshold) > 0) {
+        if (currentTransaction.amount().compareTo(threshold) > 0) {
             return new RuleEvaluationResult(
                 RULE_NAME,
                 true,
