@@ -62,6 +62,19 @@ fraud:
         time-gap-threshold: 10m
         risk-score: 60
         severity: CRITICAL
+    freeze-policy:
+      enabled: true
+      minimum-risk-score: 80
+      minimum-severity: CRITICAL
+    messaging:
+      transaction-topic: transactions-topic
+      evaluation-topic: fraud-alerts-topic
+      account-actions-topic: account-actions-topic
+      outbox-poll-delay-ms: 1000
+      outbox-publisher-enabled: false
+
+security:
+  enabled: false
 
 resilience4j:
   circuitbreaker:
