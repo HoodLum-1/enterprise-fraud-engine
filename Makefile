@@ -1,70 +1,39 @@
-# Fraud Engine - Developer Convenience Makefile
-# Usage: make <target>
+.PHONY: help up down build test smoke smoke-auth clean logs run
 
-.PHONY: help up down build test smoke clean logs
-
-# Default target
 help:
 	@echo "Fraud Engine - Developer Commands"
-	@echo "=================================="
-	@echo ""
-	@echo "Infrastructure:"
-	@echo "  make up       - Start all infrastructure (PostgreSQL, Redis, Kafka, Kafka UI)"
-	@echo "  make down     - Stop all infrastructure"
-	@echo "  make logs     - Tail logs from all containers"
-	@echo ""
-	@echo "Build & Test:"
-	@echo "  make build    - Build JAR (skip tests)"
-	@echo "  make test     - Run all tests (unit + integration with Testcontainers)"
-	@echo "  make smoke    - Run smoke test against running app (evaluation, alerts, fraud cases, metrics)"
-	@echo ""
-	@echo "Maintenance:"
-	@echo "  make clean    - Clean build artifacts and Docker volumes"
-	@echo "  make help     - Show this help"
-	@echo ""
+	@echo "  make up         Build and start the full Compose stack"
+	@echo "  make down       Stop Compose services (keeps database volume)"
+	@echo "  make build      Build the application JAR without tests"
+	@echo "  make test       Run unit and Testcontainers integration tests"
+	@echo "  make smoke      Run smoke tests against a dev-profile instance"
+	@echo "  make smoke-auth Run authenticated smoke tests (Keycloak analyst credentials)"
+	@echo "  make logs       Tail Compose service logs"
+	@echo "  make clean      Clean Maven build output and stop Compose services"
 
-# Start all infrastructure services
 up:
-	@echo "Starting infrastructure..."
-	docker compose up -d
-	@echo "Waiting for services to be healthy..."
-	@sleep 5
-	@docker compose ps
+	docker compose up --build -d
 
-# Stop all infrastructure services
 down:
-	@echo "Stopping infrastructure..."
 	docker compose down
 
-# Build the application JAR
 build:
-	@echo "Building application..."
 	./mvnw clean package -DskipTests
 
-# Run all tests (unit + integration)
 test:
-	@echo "Running tests..."
 	./mvnw test
 
-# Run smoke test against local application
 smoke:
-	@echo "Running smoke tests..."
 	./smoke-test.sh
 
-# Tail logs from all containers
+smoke-auth:
+	./smoke-test-with-auth.sh
+
 logs:
 	docker compose logs -f
 
-# Clean everything - build artifacts and Docker volumes
 clean:
-	@echo "Cleaning build artifacts..."
 	./mvnw clean
-	@echo "Stopping containers and removing volumes..."
-	docker compose down -v
-	@echo "Removing target directory..."
-	rm -rf target
+	docker compose down
 
-# Quick development cycle: build and run
-run: build
-	@echo "Starting application..."
-	java -jar target/fraud-engine-0.0.1-SNAPSHOT.jar
+run: up

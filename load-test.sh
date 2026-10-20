@@ -12,6 +12,7 @@
 #   CONCURRENCY     max requests in flight at once (default: 20)
 #   BASE_URL        service base URL               (default: http://localhost:8080)
 #   API_ENDPOINT    evaluation endpoint path       (default: /api/v1/transactions/evaluate)
+#   AUTH_TOKEN      JWT bearer token (required when security is enabled)
 #
 # Every payload carries a unique UUIDv4 id and an ISO-8601 UTC timestamp, so each POST is a
 # distinct transaction (a repeated id would be rejected with 409 Conflict).
@@ -23,8 +24,13 @@ TOTAL_REQUESTS="${TOTAL_REQUESTS:-200}"
 CONCURRENCY="${CONCURRENCY:-20}"
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 API_ENDPOINT="${API_ENDPOINT:-/api/v1/transactions/evaluate}"
+AUTH_TOKEN="${AUTH_TOKEN:-}"
 FULL_URL="${BASE_URL}${API_ENDPOINT}"
 HEALTH_URL="${BASE_URL}/actuator/health"
+AUTH_ARGS=()
+if [[ -n "$AUTH_TOKEN" ]]; then
+    AUTH_ARGS=(-H "Authorization: Bearer ${AUTH_TOKEN}")
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -135,6 +141,7 @@ main() {
         curl -s -w '%{http_code}\n' -o /dev/null \
             --max-time 30 \
             -H 'Content-Type: application/json' \
+            "${AUTH_ARGS[@]}" \
             -d @"$workdir/req_$(printf '%05d' "$j").json" \
             "$FULL_URL" >> "$results_file" &
     done

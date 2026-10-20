@@ -1,0 +1,9 @@
+.git
+.github
+target
+docs
+*.md
+*.pdf
+*.sh
+compose.yaml
+Makefile
