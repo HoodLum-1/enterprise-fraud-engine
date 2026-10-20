@@ -13,18 +13,11 @@ spring:
       maximum-pool-size: 20
       minimum-idle: 5
       connection-timeout: 20000
-  data:
-    redis:
-      host: ${SPRING_DATA_REDIS_HOST:localhost}
-      port: ${SPRING_DATA_REDIS_PORT:6379}
-      timeout: 5000ms
-      lettuce:
-        pool:
-          max-active: 8
-          max-idle: 8
-          min-idle: 0
   kafka:
     bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: fraud-engine-transactions
+      auto-offset-reset: earliest
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -33,7 +26,6 @@ spring:
         spring.json.trusted.packages: "com.capitec.connect.fraudengine.infrastructure.messaging"
         enable.idempotence: true
         max.in.flight.requests.per.connection: 5
-        transactional.id: fraud-engine-producer
       retries: 3
       acks: all
   security:

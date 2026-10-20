@@ -6,6 +6,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.errors.SerializationException;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,6 +16,7 @@ import org.springframework.kafka.core.*;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.ExponentialBackOff;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -37,26 +39,52 @@ public class KafkaConsumerConfig {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, TransactionEvaluatedEvent> kafkaListenerContainerFactory(
-            ConsumerFactory<String, TransactionEvaluatedEvent> consumerFactory,
+            @Qualifier("consumerFactory") ConsumerFactory<String, TransactionEvaluatedEvent> consumerFactory,
             KafkaTemplate<String, Object> kafkaTemplate) {
 
         ConcurrentKafkaListenerContainerFactory<String, TransactionEvaluatedEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
 
+        configureListenerContainerFactory(factory, kafkaTemplate);
+        return factory;
+    }
+
+    @Bean
+    public ConsumerFactory<String, String> transactionIngestionConsumerFactory(KafkaProperties kafkaProperties) {
+        Map<String, Object> configs = new HashMap<>(kafkaProperties.buildConsumerProperties(null));
+        configs.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        configs.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        return new DefaultKafkaConsumerFactory<>(configs, new StringDeserializer(), new StringDeserializer());
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, String> transactionIngestionListenerContainerFactory(
+            @Qualifier("transactionIngestionConsumerFactory")ConsumerFactory<String, String> transactionIngestionConsumerFactory,
+            KafkaTemplate<String, Object> kafkaTemplate) {
+        ConcurrentKafkaListenerContainerFactory<String, String> factory =
+            new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(transactionIngestionConsumerFactory);
+        configureListenerContainerFactory(factory, kafkaTemplate);
+        return factory;
+    }
+
+    private void configureListenerContainerFactory(
+            ConcurrentKafkaListenerContainerFactory<?, ?> factory,
+            KafkaTemplate<String, Object> kafkaTemplate) {
+
         ExponentialBackOff backOff = new ExponentialBackOff(500L, 2.0);
         backOff.setMaxInterval(30000L);
         backOff.setMaxElapsedTime(60000L);
 
-        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
-                (record, ex) -> new org.apache.kafka.common.TopicPartition(record.topic() + "-dlq", record.partition()));
+        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
+                kafkaTemplate, (record, ex) -> new org.apache.kafka.common.TopicPartition(record.topic() + "-dlq", -1));
 
         DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer, backOff);
         errorHandler.addNotRetryableExceptions(SerializationException.class);
 
         factory.setCommonErrorHandler(errorHandler);
         factory.setConcurrency(3);
-        return factory;
     }
 
     @Bean
@@ -64,7 +92,6 @@ public class KafkaConsumerConfig {
         Map<String, Object> configs = new HashMap<>(kafkaProperties.buildProducerProperties(null));
         configs.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         configs.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, org.springframework.kafka.support.serializer.JsonSerializer.class.getName());
-        configs.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         return new DefaultKafkaProducerFactory<>(configs);
     }
 
