@@ -53,7 +53,8 @@ class SecurityConfigTest {
                     .authorities(() -> "ROLE_FRAUD_ANALYST")))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.content").isEmpty())
-            .andExpect(jsonPath("$.totalElements").value(0));
+            .andExpect(jsonPath("$.page.totalElements").value(0))
+            .andExpect(jsonPath("$.size").doesNotExist());
     }
 
     @Test
@@ -96,7 +97,9 @@ class SecurityConfigTest {
                     .jwt(jwt -> jwt.claim("account_id", "ACC-1001"))
                     .authorities(() -> "ROLE_ACCOUNT_HOLDER")))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.content").isArray());
+            .andExpect(jsonPath("$.content").isArray())
+            .andExpect(jsonPath("$.page.totalElements").value(0))
+            .andExpect(jsonPath("$.size").doesNotExist());
 
         mockMvc.perform(get("/api/v1/fraud-alerts/account/ACC-1001")
                 .with(SecurityMockMvcRequestPostProcessors.jwt()

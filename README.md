@@ -105,7 +105,7 @@ The load test is for development verification, not capacity certification; the s
 
 - Main configuration: `src/main/resources/application.yml`.
 - Local-only profile and seed: `application-dev.yml` and `src/main/resources/db/dev/`.
-- Versioned schema changes: `src/main/resources/db/migration/`. The historical V2 demo-data migration remains immutable; V5 removes those rows, and dev-only data is seeded only when the `dev` profile is active.
+- Versioned schema changes: `src/main/resources/db/migration/` (V1-V4). The historical V2 demo-data migration remains immutable and inserts demo rows into fresh databases; it is not removed by a later production migration. The additional V5 development seed is under `src/main/resources/db/dev/` and runs only when the `dev` profile is active.
 - Integration tests use Flyway against PostgreSQL and `ddl-auto: validate`; unit tests use H2 with Flyway disabled and `create-drop`.
 - Detailed component boundaries, rule semantics, transaction/outbox behavior, and operational trade-offs are in [docs/architecture.md](docs/architecture.md).
 - The maintained API contract is [docs/openapi.yaml](docs/openapi.yaml); an importable Postman collection is in [docs/postman](docs/postman/).

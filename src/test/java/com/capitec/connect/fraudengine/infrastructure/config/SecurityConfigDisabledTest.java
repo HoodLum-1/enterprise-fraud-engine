@@ -27,6 +27,7 @@ class SecurityConfigDisabledTest {
         mockMvc.perform(get("/api/v1/fraud-cases"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isEmpty())
-                .andExpect(jsonPath("$.totalElements").value(0));
+                .andExpect(jsonPath("$.page.totalElements").value(0))
+                .andExpect(jsonPath("$.size").doesNotExist());
     }
 }

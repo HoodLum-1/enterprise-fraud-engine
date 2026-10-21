@@ -149,6 +149,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FraudAlertPage'
+              example:
+                content: []
+                page:
+                  size: 20
+                  number: 0
+                  totalElements: 0
+                  totalPages: 0
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -182,6 +189,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FraudCasePage'
+              example:
+                content: []
+                page:
+                  size: 20
+                  number: 0
+                  totalElements: 0
+                  totalPages: 0
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -437,52 +451,39 @@ components:
           format: int64
     FraudAlertPage:
       type: object
+      required: [content, page]
       properties:
         content:
           type: array
           items:
             $ref: '#/components/schemas/FraudAlert'
-        totalElements:
-          type: integer
-          format: int64
-        totalPages:
-          type: integer
-        size:
-          type: integer
-        number:
-          type: integer
-        first:
-          type: boolean
-        last:
-          type: boolean
-        numberOfElements:
-          type: integer
-        empty:
-          type: boolean
+        page:
+          $ref: '#/components/schemas/PageMetadata'
     FraudCasePage:
       type: object
+      required: [content, page]
       properties:
         content:
           type: array
           items:
             $ref: '#/components/schemas/FraudCase'
+        page:
+          $ref: '#/components/schemas/PageMetadata'
+    PageMetadata:
+      type: object
+      required: [size, number, totalElements, totalPages]
+      properties:
+        size:
+          type: integer
+          description: Effective page size after the server's maximum-size cap.
+        number:
+          type: integer
+          description: Zero-based page index.
         totalElements:
           type: integer
           format: int64
         totalPages:
           type: integer
-        size:
-          type: integer
-        number:
-          type: integer
-        first:
-          type: boolean
-        last:
-          type: boolean
-        numberOfElements:
-          type: integer
-        empty:
-          type: boolean
     Severity:
       type: string
       enum: [LOW, MEDIUM, HIGH, CRITICAL]
