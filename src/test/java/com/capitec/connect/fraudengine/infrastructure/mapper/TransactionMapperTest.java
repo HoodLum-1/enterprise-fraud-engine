@@ -70,6 +70,7 @@ class TransactionMapperTest {
         assertEquals("Cinema", entity.getMerchantName());
         assertEquals("Johannesburg", entity.getLocation());
         assertEquals(now, entity.getTimestamp());
+        assertTrue(entity.isNew(), "New assigned-ID transactions should use EntityManager.persist");
     }
 
     @Test
