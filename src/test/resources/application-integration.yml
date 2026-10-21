@@ -1,0 +1,15 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+  kafka:
+    listener:
+      auto-startup: true
+
+fraud:
+  engine:
+    messaging:
+      outbox-publisher-enabled: true

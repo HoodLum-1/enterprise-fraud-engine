@@ -69,7 +69,7 @@ public final class FraudTestDataFactory {
                 .accountId(ACCOUNT_ID)
                 .totalRiskScore(85)
                 .overallSeverity(Severity.CRITICAL)
-                .status("PENDING_REVIEW")
+                .status(CaseStatus.PENDING_REVIEW)
                 .createdAt(now)
                 .updatedAt(now);
     }
@@ -82,9 +82,11 @@ public final class FraudTestDataFactory {
                 ACCOUNT_ID,
                 85,
                 Severity.CRITICAL,
-                "PENDING_REVIEW",
+                CaseStatus.PENDING_REVIEW,
                 now,
-                now
+                now,
+                null,
+                0
         );
     }
 

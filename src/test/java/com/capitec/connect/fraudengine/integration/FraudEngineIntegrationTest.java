@@ -3,13 +3,13 @@ package com.capitec.connect.fraudengine.integration;
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.dto.response.EvaluationSummaryResponseDto;
 import com.capitec.connect.fraudengine.domain.model.Severity;
-import com.capitec.connect.fraudengine.domain.model.Transaction;
-import com.capitec.connect.fraudengine.engine.service.AccountHistoryCacheService;
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudAlertEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.TransactionEntity;
-import com.capitec.connect.fraudengine.infrastructure.cache.CacheConfiguration;
 import com.capitec.connect.fraudengine.infrastructure.repository.FraudAlertRepository;
 import com.capitec.connect.fraudengine.infrastructure.repository.TransactionRepository;
+import com.capitec.connect.fraudengine.infrastructure.repository.FraudCaseRepository;
+import com.capitec.connect.fraudengine.infrastructure.repository.FreezeAuditRepository;
+import com.capitec.connect.fraudengine.infrastructure.repository.EvaluationOutboxRepository;
 import com.capitec.connect.fraudengine.integration.util.IntegrationTestDataFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -18,9 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.cache.Cache;
-import org.springframework.cache.CacheManager;
 import org.springframework.http.MediaType;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -29,13 +28,11 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -46,7 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@ActiveProfiles("test")
+@ActiveProfiles("integration")
 class FraudEngineIntegrationTest {
 
     @Container
@@ -58,11 +55,6 @@ class FraudEngineIntegrationTest {
 
     @Container
     @ServiceConnection
-    static GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse("redis:7-alpine"))
-        .withExposedPorts(6379);
-
-    @Container
-    @ServiceConnection
     static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
 
     @DynamicPropertySource
@@ -70,8 +62,6 @@ class FraudEngineIntegrationTest {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("spring.data.redis.host", redis::getHost);
-        registry.add("spring.data.redis.port", () -> redis.getMappedPort(6379));
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
     }
 
@@ -85,18 +75,22 @@ class FraudEngineIntegrationTest {
     private FraudAlertRepository fraudAlertRepository;
 
     @Autowired
-    private CacheManager cacheManager;
+    private FraudCaseRepository fraudCaseRepository;
 
     @Autowired
-    private AccountHistoryCacheService accountHistoryCacheService;
+    private FreezeAuditRepository freezeAuditRepository;
+
+    @Autowired
+    private EvaluationOutboxRepository outboxRepository;
+
+    @Autowired
+    private KafkaTemplate<String, Object> kafkaTemplate;
 
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     @BeforeEach
     void setUp() {
-        // Clear cache before each test to avoid stale data between tests
-        cacheManager.getCacheNames().forEach(name -> cacheManager.getCache(name).clear());
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
     }
 
@@ -127,8 +121,9 @@ class FraudEngineIntegrationTest {
         assertEquals(request.location(), savedTx.getLocation());
         assertEquals(request.timestamp(), savedTx.getTimestamp());
 
-        List<FraudAlertEntity> alerts = fraudAlertRepository.findByAccountIdOrderByFlaggedAtDesc(request.accountId());
-        assertTrue(alerts.isEmpty());
+        assertTrue(fraudAlertRepository.findByAccountIdOrderByFlaggedAtDesc(
+            request.accountId(), org.springframework.data.domain.PageRequest.of(0, 20))
+            .isEmpty());
     }
 
     @Test
@@ -155,7 +150,9 @@ class FraudEngineIntegrationTest {
         TransactionEntity savedTx = transactionRepository.findById(request.id()).orElseThrow();
         assertEquals(request.amount(), savedTx.getAmount());
 
-        List<FraudAlertEntity> alerts = fraudAlertRepository.findByAccountIdOrderByFlaggedAtDesc(request.accountId());
+        List<FraudAlertEntity> alerts = fraudAlertRepository.findByAccountIdOrderByFlaggedAtDesc(
+            request.accountId(), org.springframework.data.domain.PageRequest.of(0, 20))
+            .getContent();
         assertEquals(1, alerts.size());
         FraudAlertEntity savedAlert = alerts.getFirst();
         assertEquals(request.id(), savedAlert.getTransactionId());
@@ -236,49 +233,65 @@ class FraudEngineIntegrationTest {
         assertTrue(hasVelocityAlert, "Should have TransactionVelocityRule alert");
     }
 
-    /**
-     * Exercises the Redis cache round-trip that the evaluate flow relies on:
-     * put on a cache miss, hit (JSON + java.time de/serialisation) on the next read,
-     * and eviction via {@code evictAccountHistoryCache}. A failure here (e.g. a
-     * serializer that cannot write {@link Instant}) surfaces as a circuit-breaker
-     * fallback and silently downgrades rule evaluation.
-     */
     @Test
-    void accountHistoryCache_shouldSerializeEvictAndReadBackFromRedis() {
-        String accountId = "ACC-INT-CACHE";
-        Instant now = Instant.now();
-        Instant eventTime = now.minusSeconds(300);
-
-        transactionRepository.save(TransactionEntity.builder()
-            .id(UUID.randomUUID())
-            .accountId(accountId)
-            .amount(new BigDecimal("250.00"))
-            .currency("ZAR")
-            .category("GROCERIES")
-            .merchantName("Test Merchant")
+    void evaluateTransaction_locationMismatchUsesOnlyPriorPersistedTransactions() throws Exception {
+        String accountId = "ACC-INT-LOCATION";
+        Instant firstTimestamp = Instant.now().minusSeconds(600);
+        TransactionRequestDto first = IntegrationTestDataFactory.cleanTransaction(accountId)
+            .location("Cape Town")
+            .timestamp(firstTimestamp)
+            .build();
+        TransactionRequestDto second = IntegrationTestDataFactory.cleanTransaction(accountId)
             .location("Johannesburg")
-            .timestamp(eventTime)
-            .build());
+            .timestamp(firstTimestamp.plusSeconds(300))
+            .build();
 
-        Instant cutoff = now.minus(Duration.ofHours(24));
-        Cache cache = cacheManager.getCache(CacheConfiguration.ACCOUNT_HISTORY_CACHE);
-        String cacheKey = accountId + ':' + (cutoff.toEpochMilli() / 300000);
+        mockMvc.perform(post("/api/v1/transactions/evaluate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(first)))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.isFraudulent").value(false));
 
-        // miss -> loads from the database and writes the entry to Redis
-        List<Transaction> onMiss = accountHistoryCacheService.getCachedAccountHistory(accountId, cutoff);
-        assertEquals(1, onMiss.size());
-        assertEquals(accountId, onMiss.getFirst().accountId());
-        assertNotNull(cache.get(cacheKey), "entry should be cached after a miss");
+        mockMvc.perform(post("/api/v1/transactions/evaluate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(second)))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.isFraudulent").value(true))
+            .andExpect(jsonPath("$.alerts[?(@.ruleName == 'LocationMismatchRule')]").isNotEmpty());
+    }
 
-        // hit -> value must survive the JSON round-trip (Instant included)
-        List<Transaction> onHit = accountHistoryCacheService.getCachedAccountHistory(accountId, cutoff);
-        assertEquals(1, onHit.size());
-        assertEquals(eventTime, onHit.getFirst().timestamp(), "Instant must round-trip through Redis JSON");
-        assertEquals(onMiss.getFirst().amount(), onHit.getFirst().amount());
+    @Test
+    void transactionKafkaInputAndOutboxCreateAuditedFraudCase() throws Exception {
+        String accountId = "ACC-INT-KAFKA-" + UUID.randomUUID();
+        Instant baseTime = Instant.now().minusSeconds(90);
+        TransactionRequestDto fourth = null;
 
-        // eviction -> next read goes back to the database
-        accountHistoryCacheService.evictAccountHistoryCache(accountId, cutoff);
-        assertNull(cache.get(cacheKey), "entry should be evicted");
-        assertEquals(1, accountHistoryCacheService.getCachedAccountHistory(accountId, cutoff).size());
+        for (int index = 0; index < 4; index++) {
+            TransactionRequestDto request = IntegrationTestDataFactory.cleanTransaction(accountId)
+                .timestamp(baseTime.plusSeconds(index * 15L))
+                .build();
+            if (index == 3) {
+                fourth = request;
+            }
+            kafkaTemplate.send("transactions-topic", accountId, request).get();
+        }
+
+        assertNotNull(fourth);
+        UUID transactionId = fourth.id();
+        await(() -> fraudCaseRepository.existsByTransactionId(transactionId));
+        await(() -> freezeAuditRepository.existsByTransactionId(transactionId));
+        await(() -> outboxRepository.countByEventType("ACCOUNT_FREEZE") > 0);
+        assertTrue(transactionRepository.existsById(transactionId));
+    }
+
+    private void await(java.util.function.BooleanSupplier condition) throws InterruptedException {
+        Instant deadline = Instant.now().plusSeconds(15);
+        while (Instant.now().isBefore(deadline)) {
+            if (condition.getAsBoolean()) {
+                return;
+            }
+            Thread.sleep(100);
+        }
+        assertTrue(condition.getAsBoolean(), "Timed out waiting for asynchronous Kafka processing");
     }
 }
