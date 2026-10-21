@@ -2,13 +2,19 @@ package com.capitec.connect.fraudengine.infrastructure.messaging;
 
 import com.capitec.connect.fraudengine.domain.model.FraudCase;
 import com.capitec.connect.fraudengine.domain.model.Severity;
+import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
+import com.capitec.connect.fraudengine.infrastructure.entity.EvaluationOutboxEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudCaseEntity;
+import com.capitec.connect.fraudengine.infrastructure.entity.FreezeAuditEntity;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudCaseMapper;
+import com.capitec.connect.fraudengine.infrastructure.repository.EvaluationOutboxRepository;
 import com.capitec.connect.fraudengine.infrastructure.repository.FraudCaseRepository;
+import com.capitec.connect.fraudengine.infrastructure.repository.FreezeAuditRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.KafkaHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -17,22 +23,24 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.time.Instant;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class FraudAlertConsumer {
 
-    private static final String ACCOUNT_ACTIONS_TOPIC = "account-actions-topic";
-
     private final FraudCaseRepository fraudCaseRepository;
     private final FraudCaseMapper fraudCaseMapper;
-    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final FreezeAuditRepository freezeAuditRepository;
+    private final EvaluationOutboxRepository outboxRepository;
+    private final FraudEngineProperties engineProperties;
+    private final ObjectMapper objectMapper;
 
     @Transactional
     @KafkaListener(
-            topics = "fraud-alerts-topic",
-            groupId = "fraud-alert-consumer-group",
+            topics = "${fraud.engine.messaging.evaluation-topic:fraud-alerts-topic}",
+            groupId = "${spring.kafka.consumer.fraud-alert-group-id:fraud-alert-consumer-group}",
             containerFactory = "kafkaListenerContainerFactory")
     public void consumeTransactionEvaluatedEvent(
             @Payload TransactionEvaluatedEvent event,
@@ -46,7 +54,14 @@ public class FraudAlertConsumer {
         log.info("Consumed fraud alert event for transaction {} from account {}",
                 event.getTransactionId(), event.getAccountId());
 
-        // --- 1. Fraud Case Management: Persist high-risk events (PENDING_REVIEW) ---
+        boolean isFraudulent = event.isFraudulent() || event.getAlertsGenerated() > 0
+            || (event.getTriggeredRules() != null && event.getTriggeredRules().stream()
+                .anyMatch(TransactionEvaluatedEvent.RuleEvaluationInfo::isTriggered));
+        if (!isFraudulent) {
+            log.debug("Ignoring clean evaluation event for transaction {}", event.getTransactionId());
+            return;
+        }
+
         Optional<FraudCaseEntity> existingCase = fraudCaseRepository.findByTransactionId(event.getTransactionId());
         if (existingCase.isPresent()) {
             log.debug("Fraud case already exists for transaction {} - skipping duplicate persist", event.getTransactionId());
@@ -62,23 +77,51 @@ public class FraudAlertConsumer {
                     saved.getId(), event.getTransactionId(), event.getOverallSeverity(), event.getTotalRiskScore());
         }
 
-        // --- 2. Automated Mitigation: CRITICAL severity or riskScore >= 80 ---
-        boolean isCriticalOrHigh =
-                event.getOverallSeverity() == Severity.CRITICAL
-                        || event.getTotalRiskScore() >= 80;
+        FraudEngineProperties.FreezePolicy policy = engineProperties.getFreezePolicy();
+        boolean freezeEligible = policy.isEnabled()
+            && (event.getTotalRiskScore() >= policy.getMinimumRiskScore()
+                || (event.getOverallSeverity() != null
+                    && event.getOverallSeverity().ordinal() >= policy.getMinimumSeverity().ordinal()));
 
-        if (isCriticalOrHigh) {
+        if (freezeEligible && !freezeAuditRepository.existsByTransactionId(event.getTransactionId())) {
             log.warn("AUTOMATED MITIGATION: Transaction {} from account {} is CRITICAL/HIGH risk "
                             + "(severity={}, riskScore={}) - initiating account freeze",
                     event.getTransactionId(), event.getAccountId(),
                     event.getOverallSeverity(), event.getTotalRiskScore());
 
-            String freezeEvent = String.format(
-                    "{\"eventId\":\"%s\",\"eventType\":\"ACCOUNT_FREEZE\",\"transactionId\":\"%s\",\"accountId\":\"%s\",\"reason\":\"Critical/high risk fraud detected\"}",
-                    UUID.randomUUID(), event.getTransactionId(), event.getAccountId());
-
-            kafkaTemplate.send(ACCOUNT_ACTIONS_TOPIC, event.getAccountId(), freezeEvent);
-            log.info("Published ACCOUNT_FREEZE command to topic {} for account {}", ACCOUNT_ACTIONS_TOPIC, event.getAccountId());
+            UUID eventId = event.getEventId() != null ? event.getEventId() : event.getTransactionId();
+            String reason = "Critical/high risk fraud detected";
+            Instant now = Instant.now();
+            freezeAuditRepository.save(FreezeAuditEntity.builder()
+                .id(UUID.randomUUID())
+                .transactionId(event.getTransactionId())
+                .eventId(eventId)
+                .accountId(event.getAccountId())
+                .totalRiskScore(event.getTotalRiskScore())
+                .overallSeverity(event.getOverallSeverity())
+                .reason(reason)
+                .decidedAt(now)
+                .build());
+            AccountActionEvent action = AccountActionEvent.builder()
+                .eventId(eventId)
+                .eventType("ACCOUNT_FREEZE")
+                .transactionId(event.getTransactionId())
+                .accountId(event.getAccountId())
+                .reason(reason)
+                .timestamp(now)
+                .build();
+            try {
+                outboxRepository.save(EvaluationOutboxEntity.builder()
+                    .id(UUID.randomUUID())
+                    .eventKey(event.getAccountId())
+                    .eventType("ACCOUNT_FREEZE")
+                    .payload(objectMapper.writeValueAsString(action))
+                    .createdAt(now)
+                    .attempts(0)
+                    .build());
+            } catch (JsonProcessingException ex) {
+                throw new IllegalStateException("Unable to serialize account freeze event", ex);
+            }
         }
 
         // --- 3. Customer Notification Mock ---
