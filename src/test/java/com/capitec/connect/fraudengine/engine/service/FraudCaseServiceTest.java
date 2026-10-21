@@ -1,6 +1,7 @@
 package com.capitec.connect.fraudengine.engine.service;
 
 import com.capitec.connect.fraudengine.domain.model.FraudCase;
+import com.capitec.connect.fraudengine.domain.model.CaseStatus;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudCaseEntity;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudCaseMapper;
@@ -37,18 +38,19 @@ class FraudCaseServiceTest {
     void createFromEvaluation_persistsNewFraudCase() {
         UUID txId = UUID.randomUUID();
         FraudCaseEntity mockEntity = new FraudCaseEntity();
-        mockEntity.setStatus("PENDING_REVIEW");
+        mockEntity.setStatus(CaseStatus.PENDING_REVIEW);
 
         when(fraudCaseMapper.toEntity(any(FraudCase.class))).thenReturn(mockEntity);
         when(fraudCaseRepository.save(any(FraudCaseEntity.class))).thenReturn(mockEntity);
         when(fraudCaseMapper.toDomain(mockEntity)).thenReturn(
-                new FraudCase(UUID.randomUUID(), txId, "ACC-1001", 80, Severity.CRITICAL, "PENDING_REVIEW", null, null)
+                new FraudCase(UUID.randomUUID(), txId, "ACC-1001", 80, Severity.CRITICAL,
+                    CaseStatus.PENDING_REVIEW, null, null, null, 0)
         );
 
         FraudCase result = fraudCaseService.createFromEvaluation(txId, "ACC-1001", 80, Severity.CRITICAL);
 
         assertNotNull(result);
-        assertEquals("PENDING_REVIEW", result.status());
+        assertEquals(CaseStatus.PENDING_REVIEW, result.status());
         verify(fraudCaseRepository).save(any(FraudCaseEntity.class));
     }
 
@@ -57,18 +59,19 @@ class FraudCaseServiceTest {
         UUID txId = UUID.randomUUID();
         FraudCaseEntity existing = new FraudCaseEntity();
         existing.setTransactionId(txId);
-        existing.setStatus("PENDING_REVIEW");
+        existing.setStatus(CaseStatus.PENDING_REVIEW);
 
         when(fraudCaseRepository.findByTransactionId(txId)).thenReturn(Optional.of(existing));
         when(fraudCaseRepository.save(any())).thenReturn(existing);
         when(fraudCaseMapper.toDomain(existing)).thenReturn(
-                new FraudCase(UUID.randomUUID(), txId, "ACC-1001", 80, Severity.CRITICAL, "CONFIRMED_FRAUD", null, null)
+                new FraudCase(UUID.randomUUID(), txId, "ACC-1001", 80, Severity.CRITICAL,
+                    CaseStatus.CONFIRMED_FRAUD, null, null, "analyst", 1)
         );
 
-        FraudCase result = fraudCaseService.updateStatus(txId, "CONFIRMED_FRAUD");
+        FraudCase result = fraudCaseService.updateStatus(txId, CaseStatus.CONFIRMED_FRAUD, "analyst");
 
         assertNotNull(result);
-        assertEquals("CONFIRMED_FRAUD", result.status());
+        assertEquals(CaseStatus.CONFIRMED_FRAUD, result.status());
         verify(fraudCaseRepository).save(existing);
     }
 
@@ -76,8 +79,8 @@ class FraudCaseServiceTest {
     void updateStatus_unknownTransaction_throws() {
         when(fraudCaseRepository.findByTransactionId(any())).thenReturn(Optional.empty());
 
-        assertThrows(IllegalArgumentException.class,
-                () -> fraudCaseService.updateStatus(UUID.randomUUID(), "CONFIRMED_FRAUD"));
+        assertThrows(com.capitec.connect.fraudengine.api.exception.TransactionNotFoundException.class,
+                () -> fraudCaseService.updateStatus(UUID.randomUUID(), CaseStatus.CONFIRMED_FRAUD, "analyst"));
     }
 
     @Test
@@ -88,11 +91,12 @@ class FraudCaseServiceTest {
         entity.setAccountId("ACC-1001");
         entity.setTotalRiskScore(40);
         entity.setOverallSeverity(Severity.HIGH);
-        entity.setStatus("PENDING_REVIEW");
+        entity.setStatus(CaseStatus.PENDING_REVIEW);
 
         when(fraudCaseRepository.findByTransactionId(txId)).thenReturn(Optional.of(entity));
         when(fraudCaseMapper.toDomain(entity)).thenReturn(
-                new FraudCase(UUID.randomUUID(), txId, "ACC-1001", 40, Severity.HIGH, "PENDING_REVIEW", null, null)
+                new FraudCase(UUID.randomUUID(), txId, "ACC-1001", 40, Severity.HIGH,
+                    CaseStatus.PENDING_REVIEW, null, null, null, 0)
         );
 
         FraudCase result = fraudCaseService.findByTransactionId(txId);

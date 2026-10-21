@@ -1,6 +1,5 @@
 package com.capitec.connect.fraudengine.engine.service;
 
-import com.capitec.connect.fraudengine.api.dto.response.FraudAlertResponseDto;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudAlertEntity;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
@@ -12,11 +11,15 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.util.List;
-import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -32,7 +35,7 @@ class FraudAlertQueryServiceTest {
     private FraudAlertQueryService fraudAlertQueryService;
 
     @Test
-    void testGetAlertsByAccountId_ReturnsMappedAlerts() {
+    void returnsPagedMappedAlertsAndFilters() {
         FraudAlertEntity entity = FraudTestDataFactory.fraudAlertEntity()
             .accountId("ACC-123")
             .ruleName("TransactionVelocityRule")
@@ -40,36 +43,29 @@ class FraudAlertQueryServiceTest {
             .severity(Severity.CRITICAL)
             .reason("High velocity")
             .build();
+        PageRequest pageable = PageRequest.of(0, 20);
+        Page<FraudAlertEntity> page = new PageImpl<>(List.of(entity), pageable, 1);
+        when(fraudAlertRepository.findAll(any(Specification.class), eq(pageable))).thenReturn(page);
 
-        when(fraudAlertRepository.findByAccountIdOrderByFlaggedAtDesc("ACC-123"))
-            .thenReturn(List.of(entity));
+        var result = fraudAlertQueryService.getAlertsByAccountId(
+            "ACC-123", Severity.CRITICAL, "TransactionVelocityRule", null, null, pageable);
 
-        List<FraudAlertResponseDto> result = fraudAlertQueryService.getAlertsByAccountId("ACC-123");
-
-        assertNotNull(result);
-        assertEquals(1, result.size());
-        FraudAlertResponseDto dto = result.getFirst();
-        assertEquals(entity.getId(), dto.id());
-        assertEquals(entity.getTransactionId(), dto.transactionId());
-        assertEquals("ACC-123", dto.accountId());
-        assertEquals("TransactionVelocityRule", dto.ruleName());
-        assertEquals(50, dto.riskScore());
-        assertEquals(Severity.CRITICAL, dto.severity());
-        assertEquals("High velocity", dto.reason());
-        assertEquals(entity.getFlaggedAt(), dto.flaggedAt());
-
-        verify(fraudAlertRepository).findByAccountIdOrderByFlaggedAtDesc("ACC-123");
+        assertEquals(1, result.getTotalElements());
+        assertEquals("ACC-123", result.getContent().getFirst().accountId());
+        assertEquals(Severity.CRITICAL, result.getContent().getFirst().severity());
+        verify(fraudAlertRepository).findAll(any(Specification.class), eq(pageable));
     }
 
     @Test
-    void testGetAlertsByAccountId_WhenNoAlerts_ReturnsEmptyList() {
-        when(fraudAlertRepository.findByAccountIdOrderByFlaggedAtDesc("ACC-EMPTY"))
-            .thenReturn(List.of());
+    void returnsEmptyPageWhenAccountHasNoAlerts() {
+        PageRequest pageable = PageRequest.of(0, 20);
+        when(fraudAlertRepository.findAll(any(Specification.class), eq(pageable)))
+            .thenReturn(Page.empty(pageable));
 
-        List<FraudAlertResponseDto> result = fraudAlertQueryService.getAlertsByAccountId("ACC-EMPTY");
+        var result = fraudAlertQueryService.getAlertsByAccountId(
+            "ACC-EMPTY", null, null, null, null, pageable);
 
-        assertNotNull(result);
         assertTrue(result.isEmpty());
-        verify(fraudAlertRepository).findByAccountIdOrderByFlaggedAtDesc("ACC-EMPTY");
+        verify(fraudAlertRepository).findAll(any(Specification.class), eq(pageable));
     }
 }

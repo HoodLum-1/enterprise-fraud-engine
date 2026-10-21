@@ -1,6 +1,7 @@
 package com.capitec.connect.fraudengine.api.controller;
 
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
+import com.capitec.connect.fraudengine.api.dto.response.TransactionDetailsResponseDto;
 import com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException;
 import com.capitec.connect.fraudengine.api.exception.GlobalExceptionHandler;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
@@ -8,6 +9,8 @@ import com.capitec.connect.fraudengine.domain.model.FraudAlert;
 import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.engine.service.FraudEvaluationService;
+import com.capitec.connect.fraudengine.engine.service.TransactionQueryService;
+import com.capitec.connect.fraudengine.infrastructure.security.AccountAccessPolicy;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
 import com.capitec.connect.fraudengine.util.FraudTestDataFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,6 +45,12 @@ class TransactionControllerTest {
 
     @Spy
     private FraudAlertMapper fraudAlertMapper = new FraudAlertMapper();
+
+    @Mock
+    private TransactionQueryService transactionQueryService;
+
+    @Mock
+    private AccountAccessPolicy accountAccessPolicy;
 
     @InjectMocks
     private TransactionController transactionController;

@@ -1,80 +1,71 @@
 package com.capitec.connect.fraudengine.api.controller;
 
 import com.capitec.connect.fraudengine.api.dto.response.FraudAlertResponseDto;
-import com.capitec.connect.fraudengine.api.exception.GlobalExceptionHandler;
-import com.capitec.connect.fraudengine.domain.model.FraudAlert;
-import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.engine.service.FraudAlertQueryService;
-import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
-import com.capitec.connect.fraudengine.util.FraudTestDataFactory;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.http.MediaType;
-import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import com.capitec.connect.fraudengine.infrastructure.security.AccountAccessPolicy;
 
 import java.util.List;
 
-import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class FraudAlertControllerTest {
 
-    private MockMvc mockMvc;
-
     @Mock
     private FraudAlertQueryService fraudAlertQueryService;
+
+    @org.mockito.Spy
+    private AccountAccessPolicy accountAccessPolicy;
 
     @InjectMocks
     private FraudAlertController fraudAlertController;
 
-    @BeforeEach
-    void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(fraudAlertController)
-            .setControllerAdvice(new GlobalExceptionHandler())
-            .build();
+    @Test
+    void analystCanReadPaginatedAlerts() {
+        PageRequest pageable = PageRequest.of(0, 20);
+        JwtAuthenticationToken analyst = authentication("other-account", "ROLE_FRAUD_ANALYST");
+        when(fraudAlertQueryService.getAlertsByAccountId("ACC-123", null, null, null, null, pageable))
+            .thenReturn(Page.empty(pageable));
+
+        var response = fraudAlertController.getAlertsByAccountId(
+            "ACC-123", null, null, null, null, pageable, analyst);
+
+        assertEquals(200, response.getStatusCode().value());
+        assertNotNull(response.getBody());
+        verify(fraudAlertQueryService).getAlertsByAccountId("ACC-123", null, null, null, null, pageable);
     }
 
     @Test
-    void testGetAlertsByAccountId_ReturnsAlertsList() throws Exception {
-        FraudAlert alert = FraudTestDataFactory.fraudAlert()
-            .accountId("ACC-123")
-            .ruleName("TransactionVelocityRule")
-            .riskScore(50)
-            .severity(Severity.CRITICAL)
-            .reason("High velocity")
-            .build();
-        FraudAlertResponseDto dto = new FraudAlertMapper().toResponseDto(alert);
+    void accountHolderMayReadOnlyOwnAccountAlerts() {
+        PageRequest pageable = PageRequest.of(0, 20);
+        JwtAuthenticationToken owner = authentication("ACC-123", "ROLE_ACCOUNT_HOLDER");
+        when(fraudAlertQueryService.getAlertsByAccountId("ACC-123", null, null, null, null, pageable))
+            .thenReturn(Page.empty(pageable));
 
-        when(fraudAlertQueryService.getAlertsByAccountId("ACC-123"))
-            .thenReturn(List.of(dto));
-
-        mockMvc.perform(get("/api/v1/fraud-alerts/account/{accountId}", "ACC-123")
-                .accept(MediaType.APPLICATION_JSON))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$[0].id").value(alert.id().toString()))
-            .andExpect(jsonPath("$[0].transactionId").value(alert.transactionId().toString()))
-            .andExpect(jsonPath("$[0].accountId").value("ACC-123"))
-            .andExpect(jsonPath("$[0].ruleName").value("TransactionVelocityRule"))
-            .andExpect(jsonPath("$[0].riskScore").value(50))
-            .andExpect(jsonPath("$[0].severity").value("CRITICAL"))
-            .andExpect(jsonPath("$[0].reason").value("High velocity"));
+        assertDoesNotThrow(() -> fraudAlertController.getAlertsByAccountId(
+            "ACC-123", null, null, null, null, pageable, owner));
+        assertThrows(AccessDeniedException.class, () -> fraudAlertController.getAlertsByAccountId(
+            "ACC-999", null, null, null, null, pageable, owner));
     }
 
-    @Test
-    void testGetAlertsByAccountId_WhenEmpty_ReturnsEmptyList() throws Exception {
-        when(fraudAlertQueryService.getAlertsByAccountId("ACC-UNKNOWN"))
-            .thenReturn(List.of());
-
-        mockMvc.perform(get("/api/v1/fraud-alerts/account/{accountId}", "ACC-UNKNOWN")
-                .accept(MediaType.APPLICATION_JSON))
-            .andExpect(status().isOk())
-            .andExpect(content().json("[]"));
+    private JwtAuthenticationToken authentication(String accountId, String role) {
+        Jwt jwt = Jwt.withTokenValue("test-token")
+            .header("alg", "none")
+            .claim("account_id", accountId)
+            .build();
+        return new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority(role)));
     }
 }

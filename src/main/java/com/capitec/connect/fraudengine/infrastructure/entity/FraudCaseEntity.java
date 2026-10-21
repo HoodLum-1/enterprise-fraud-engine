@@ -1,6 +1,7 @@
 package com.capitec.connect.fraudengine.infrastructure.entity;
 
 import com.capitec.connect.fraudengine.domain.model.Severity;
+import com.capitec.connect.fraudengine.domain.model.CaseStatus;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -35,8 +36,9 @@ public class FraudCaseEntity {
     @Column(name = "overall_severity", nullable = false, length = 20)
     private Severity overallSeverity;
 
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
-    private String status;
+    private CaseStatus status;
 
     @Column(name = "created_at", nullable = false)
     @Builder.Default
@@ -45,8 +47,19 @@ public class FraudCaseEntity {
     @Column(name = "updated_at")
     private Instant updatedAt;
 
-    public void updateStatus(String newStatus) {
+    @Column(name = "updated_by", length = 100)
+    private String updatedBy;
+
+    @Version
+    @Column(nullable = false)
+    private long version;
+
+    public void updateStatus(CaseStatus newStatus, String actor) {
+        if (!status.canTransitionTo(newStatus)) {
+            throw new IllegalArgumentException("Invalid fraud case status transition: " + status + " -> " + newStatus);
+        }
         this.status = newStatus;
         this.updatedAt = Instant.now();
+        this.updatedBy = actor;
     }
 }

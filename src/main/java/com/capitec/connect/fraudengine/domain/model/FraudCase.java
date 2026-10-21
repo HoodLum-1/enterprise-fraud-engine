@@ -10,9 +10,11 @@ public record FraudCase(
         String accountId,
         int totalRiskScore,
         Severity overallSeverity,
-        String status,
+        CaseStatus status,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String updatedBy,
+        long version
 ) {
     public FraudCase {
         Objects.requireNonNull(transactionId, "Transaction ID must not be null");
@@ -23,8 +25,8 @@ public record FraudCase(
             throw new IllegalArgumentException("Total risk score must not be negative");
         }
         Objects.requireNonNull(overallSeverity, "Overall severity must not be null");
-        if (status == null || status.isBlank()) {
-            status = "PENDING_REVIEW";
+        if (status == null) {
+            status = CaseStatus.PENDING_REVIEW;
         }
         if (createdAt == null) {
             createdAt = Instant.now();
@@ -32,6 +34,7 @@ public record FraudCase(
     }
 
     public FraudCase(UUID transactionId, String accountId, int totalRiskScore, Severity overallSeverity) {
-        this(UUID.randomUUID(), transactionId, accountId, totalRiskScore, overallSeverity, "PENDING_REVIEW", Instant.now(), Instant.now());
+        this(UUID.randomUUID(), transactionId, accountId, totalRiskScore, overallSeverity,
+            CaseStatus.PENDING_REVIEW, Instant.now(), Instant.now(), null, 0);
     }
 }

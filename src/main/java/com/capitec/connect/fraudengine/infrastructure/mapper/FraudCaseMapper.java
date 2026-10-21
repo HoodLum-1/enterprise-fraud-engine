@@ -19,7 +19,9 @@ public class FraudCaseMapper {
                 entity.getOverallSeverity(),
                 entity.getStatus(),
                 entity.getCreatedAt(),
-                entity.getUpdatedAt()
+                entity.getUpdatedAt(),
+                entity.getUpdatedBy(),
+                entity.getVersion()
         );
     }
 
@@ -36,6 +38,8 @@ public class FraudCaseMapper {
                 .status(domain.status())
                 .createdAt(domain.createdAt())
                 .updatedAt(domain.updatedAt())
+                .updatedBy(domain.updatedBy())
+                .version(domain.version())
                 .build();
     }
 }
