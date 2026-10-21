@@ -45,15 +45,6 @@ spring:
     baseline-on-migrate: true
     locations: classpath:db/migration
 
-# Cache Configuration
-  cache:
-    type: redis
-    redis:
-      time-to-live: 300000
-      cache-null-values: false
-      use-key-prefix: true
-      key-prefix: "fraud-engine:"
-
 fraud:
   engine:
     evaluation:
