@@ -105,12 +105,12 @@ management:
         include: health, info, metrics, prometheus
   endpoint:
     health:
-      show-details: always
+      show-details: never
 
 # Logging Configuration
 logging:
   level:
-    com.capitec.connect.fraudengine: DEBUG
+    com.capitec.connect.fraudengine: INFO
     org.springframework.web: INFO
     org.apache.kafka: WARN
     org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: ERROR

@@ -10,6 +10,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -25,6 +26,7 @@ class SecurityConfigDisabledTest {
     void shouldAllowAccessWhenSecurityDisabled() throws Exception {
         mockMvc.perform(get("/api/v1/fraud-cases"))
                 .andExpect(status().isOk())
-                .andExpect(content().json("[]"));
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.totalElements").value(0));
     }
 }

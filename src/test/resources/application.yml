@@ -26,7 +26,6 @@ spring:
         spring.json.trusted.packages: "com.capitec.connect.fraudengine.infrastructure.messaging"
         enable.idempotence: true
         max.in.flight.requests.per.connection: 5
-        transactional.id: fraud-engine-test-producer
       retries: 3
       acks: all
   security:
@@ -48,9 +47,15 @@ fraud:
     rules:
       high-amount:
         enabled: true
-        threshold: 50000.00
+        thresholds:
+          ZAR: 50000.00
         risk-score: 40
         severity: HIGH
+      category-risk:
+        enabled: true
+        categories: [GAMBLING, CRYPTO]
+        risk-score: 30
+        severity: MEDIUM
       velocity:
         enabled: true
         threshold: 3
@@ -90,9 +95,9 @@ resilience4j:
   ratelimiter:
     instances:
       fraudEngine:
-        limitForPeriod: 1000
-        limitRefreshPeriod: 60s
-        timeoutDuration: 1000
+        limitForPeriod: 10000
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0
 
 management:
   endpoints:
@@ -101,4 +106,4 @@ management:
         include: health, info, metrics, prometheus
   endpoint:
     health:
-      show-details: always
+      show-details: never
