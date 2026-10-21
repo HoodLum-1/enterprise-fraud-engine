@@ -109,4 +109,22 @@ class GlobalExceptionHandlerTest {
         assertEquals("Internal Server Error", problemDetail.getTitle());
         assertEquals("An unexpected internal error occurred.", problemDetail.getDetail());
     }
+
+    @Test
+    void rateLimitIs429WithRetryAfter() {
+        var response = exceptionHandler.handleRateLimitExceeded(new RateLimitExceededException(new RuntimeException()));
+
+        assertEquals(HttpStatus.TOO_MANY_REQUESTS, response.getStatusCode());
+        assertEquals("1", response.getHeaders().getFirst("Retry-After"));
+        assertEquals(429, response.getBody().getStatus());
+    }
+
+    @Test
+    void evaluationUnavailableIs503WithRetryAfter() {
+        var response = exceptionHandler.handleEvaluationUnavailable(new EvaluationUnavailableException(new RuntimeException()));
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
+        assertEquals("5", response.getHeaders().getFirst("Retry-After"));
+        assertEquals(503, response.getBody().getStatus());
+    }
 }

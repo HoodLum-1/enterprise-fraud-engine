@@ -17,6 +17,10 @@ import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperti
 import com.capitec.connect.fraudengine.infrastructure.messaging.FraudEventProducer;
 
 import com.capitec.connect.fraudengine.util.FraudTestDataFactory;
+import com.capitec.connect.fraudengine.api.exception.RateLimitExceededException;
+import com.capitec.connect.fraudengine.api.exception.EvaluationUnavailableException;
+import io.github.resilience4j.ratelimiter.RequestNotPermitted;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -50,10 +54,10 @@ class FraudEvaluationServiceTest {
     private FraudEngine fraudEngine;
 
     @Mock
-    private AccountHistoryCacheService accountHistoryCacheService;
+    private AccountHistoryService accountHistoryService;
 
     @Mock
-    private FraudEventProducer fraudEventProducer;
+    private EvaluationOutboxService evaluationOutboxService;
 
     @Spy
     private TransactionMapper transactionMapper = new TransactionMapper();
@@ -104,7 +108,7 @@ class FraudEvaluationServiceTest {
 
         Transaction historyDomain = transactionMapper.toDomain(historyEntity);
 
-        when(accountHistoryCacheService.getCachedAccountHistory(eq("ACC-1001"), any(Instant.class)))
+        when(accountHistoryService.findHistory(eq("ACC-1001"), any(Instant.class), any(Instant.class)))
                 .thenReturn(List.of(historyDomain));
 
         FraudAlert alert = FraudTestDataFactory.fraudAlert()
@@ -140,12 +144,13 @@ class FraudEvaluationServiceTest {
 
         verify(transactionRepository).save(any(TransactionEntity.class));
         verify(fraudAlertRepository).saveAll(anyList());
+        verify(evaluationOutboxService).enqueueEvaluation(any(Transaction.class), eq(expectedSummary));
     }
 
     @Test
     void testEvaluate_SuccessfulEvaluation_WithoutAlerts() {
         when(transactionRepository.existsById(txId)).thenReturn(false);
-        when(accountHistoryCacheService.getCachedAccountHistory(eq("ACC-1001"), any(Instant.class)))
+        when(accountHistoryService.findHistory(eq("ACC-1001"), any(Instant.class), any(Instant.class)))
                 .thenReturn(List.of());
 
         EvaluationSummary expectedSummary = FraudTestDataFactory.evaluationSummary(
@@ -167,12 +172,13 @@ class FraudEvaluationServiceTest {
 
         verify(transactionRepository).save(any(TransactionEntity.class));
         verify(fraudAlertRepository, never()).saveAll(any());
+        verify(evaluationOutboxService).enqueueEvaluation(any(Transaction.class), eq(expectedSummary));
     }
 
     @Test
     void testEvaluate_UsesConfiguredHistoryWindow() {
         when(transactionRepository.existsById(txId)).thenReturn(false);
-        when(accountHistoryCacheService.getCachedAccountHistory(eq("ACC-1001"), any(Instant.class)))
+        when(accountHistoryService.findHistory(eq("ACC-1001"), any(Instant.class), any(Instant.class)))
                 .thenReturn(List.of());
         when(fraudEngine.evaluate(any(Transaction.class), anyList())).thenReturn(
                 FraudTestDataFactory.evaluationSummary(txId, "ACC-1001", 0, Severity.LOW, List.of(), List.of())
@@ -180,20 +186,67 @@ class FraudEvaluationServiceTest {
 
         engineProperties.getEvaluation().setHistoryWindow(Duration.ofHours(2));
 
-        Instant before = Instant.now();
+        Instant transactionTime = requestDto.timestamp();
         fraudEvaluationService.evaluate(requestDto);
-        Instant after = Instant.now();
 
-        ArgumentCaptor<Instant> cutoffCaptor = ArgumentCaptor.forClass(Instant.class);
-        verify(accountHistoryCacheService).getCachedAccountHistory(eq("ACC-1001"), cutoffCaptor.capture());
+        ArgumentCaptor<Instant> fromCaptor = ArgumentCaptor.forClass(Instant.class);
+        ArgumentCaptor<Instant> toCaptor = ArgumentCaptor.forClass(Instant.class);
+        verify(accountHistoryService).findHistory(eq("ACC-1001"), fromCaptor.capture(), toCaptor.capture());
+        assertEquals(transactionTime.minus(Duration.ofHours(2)), fromCaptor.getValue());
+        assertEquals(transactionTime, toCaptor.getValue());
+    }
 
-        Instant cutoff = cutoffCaptor.getValue();
-        assertFalse(cutoff.isBefore(before.minus(Duration.ofHours(2))), "cutoff should not be earlier than (start - 2h)");
-        assertFalse(cutoff.isAfter(after.minus(Duration.ofHours(2))), "cutoff should not be later than (end - 2h)");
+    @Test
+    void evaluateExcludesCurrentTransactionFromHistoryAndReadsBeforeSaving() {
+        when(transactionRepository.existsById(txId)).thenReturn(false);
+        Transaction current = FraudTestDataFactory.transaction()
+            .id(txId)
+            .accountId("ACC-1001")
+            .timestamp(requestDto.timestamp())
+            .build();
+        when(accountHistoryService.findHistory(eq("ACC-1001"), any(Instant.class), any(Instant.class)))
+            .thenReturn(List.of(current));
+        when(fraudEngine.evaluate(any(Transaction.class), anyList())).thenReturn(
+            FraudTestDataFactory.evaluationSummary(txId, "ACC-1001", 0, Severity.LOW, List.of(), List.of())
+        );
+
+        fraudEvaluationService.evaluate(requestDto);
+
+        ArgumentCaptor<List<Transaction>> historyCaptor = ArgumentCaptor.forClass(List.class);
+        verify(fraudEngine).evaluate(any(Transaction.class), historyCaptor.capture());
+        assertTrue(historyCaptor.getValue().isEmpty());
+        org.mockito.InOrder order = inOrder(accountHistoryService, fraudEngine, transactionRepository);
+        order.verify(accountHistoryService).findHistory(eq("ACC-1001"), any(Instant.class), any(Instant.class));
+        order.verify(fraudEngine).evaluate(any(Transaction.class), anyList());
+        order.verify(transactionRepository).save(any(TransactionEntity.class));
     }
 
     @Test
     void historyWindowDefaultsTo24Hours() {
         assertEquals(Duration.ofHours(24), new FraudEngineProperties().getEvaluation().getHistoryWindow());
+    }
+
+    @Test
+    void rateLimitFallbackRejectsWithoutPersistingOrPublishing() {
+        RequestNotPermitted rejection = mock(RequestNotPermitted.class);
+
+        assertThrows(RateLimitExceededException.class,
+            () -> fraudEvaluationService.evaluateFallback(requestDto, rejection));
+
+        verify(transactionRepository, never()).save(any());
+        verify(fraudAlertRepository, never()).saveAll(any());
+        verifyNoInteractions(evaluationOutboxService);
+    }
+
+    @Test
+    void circuitBreakerFallbackReturnsUnavailableWithoutPersistingOrPublishing() {
+        CallNotPermittedException openCircuit = mock(CallNotPermittedException.class);
+
+        assertThrows(EvaluationUnavailableException.class,
+            () -> fraudEvaluationService.evaluateFallback(requestDto, openCircuit));
+
+        verify(transactionRepository, never()).save(any());
+        verify(fraudAlertRepository, never()).saveAll(any());
+        verifyNoInteractions(evaluationOutboxService);
     }
 }

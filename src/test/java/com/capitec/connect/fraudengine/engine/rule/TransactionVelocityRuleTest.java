@@ -25,7 +25,7 @@ class TransactionVelocityRuleTest {
     }
 
     @Test
-    void shouldTriggerWhenMoreThanThreeTransactionsOccurWithinTwoMinutes() {
+    void shouldTriggerWhenFourIncludingCurrentTransactionsOccurWithinTwoMinutes() {
         Instant now = Instant.now();
         Transaction currentTx = FraudTestDataFactory.transaction()
             .accountId("ACC-123")
@@ -37,8 +37,8 @@ class TransactionVelocityRuleTest {
             .build();
 
         List<Transaction> history = new ArrayList<>();
-        // 4 transactions in the last 1 minute
-        for (int i = 1; i <= 4; i++) {
+        // Three prior transactions plus the current transaction make four.
+        for (int i = 1; i <= 3; i++) {
             history.add(FraudTestDataFactory.transaction()
                 .accountId("ACC-123")
                 .amount(new BigDecimal("50.00"))
@@ -58,7 +58,7 @@ class TransactionVelocityRuleTest {
     }
 
     @Test
-    void shouldNotTriggerWhenThreeOrFewerTransactionsOccurWithinTwoMinutes() {
+    void shouldNotTriggerWhenExactlyThreeIncludingCurrentTransactionsOccurWithinTwoMinutes() {
         Instant now = Instant.now();
         Transaction currentTx = FraudTestDataFactory.transaction()
             .accountId("ACC-123")
@@ -70,8 +70,8 @@ class TransactionVelocityRuleTest {
             .build();
 
         List<Transaction> history = new ArrayList<>();
-        // 3 transactions within 2 minutes
-        for (int i = 1; i <= 3; i++) {
+        // Two prior transactions plus the current transaction make three.
+        for (int i = 1; i <= 2; i++) {
             history.add(FraudTestDataFactory.transaction()
                 .accountId("ACC-123")
                 .amount(new BigDecimal("50.00"))

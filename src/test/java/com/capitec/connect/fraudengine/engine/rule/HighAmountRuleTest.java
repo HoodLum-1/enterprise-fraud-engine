@@ -52,7 +52,8 @@ class HighAmountRuleTest {
     @Test
     void shouldRespectCustomProperties() {
         com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties props = new com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties();
-        props.getRules().getHighAmount().setThreshold(new BigDecimal("10000.00"));
+        props.getRules().getHighAmount().setThresholds(
+            java.util.Map.of("ZAR", new BigDecimal("10000.00")));
         props.getRules().getHighAmount().setRiskScore(75);
         props.getRules().getHighAmount().setSeverity(Severity.CRITICAL);
 
@@ -75,5 +76,13 @@ class HighAmountRuleTest {
 
         assertFalse(result.isTriggered());
         assertEquals(0, result.riskScore());
+    }
+
+    @Test
+    void shouldRejectCurrenciesWithoutConfiguredThreshold() {
+        Transaction tx = FraudTestDataFactory.transaction().currency("USD").build();
+
+        assertThrows(com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException.class,
+            () -> rule.evaluate(tx, List.of()));
     }
 }
