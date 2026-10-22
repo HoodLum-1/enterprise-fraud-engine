@@ -1,9 +1,9 @@
 package com.capitec.connect.fraudengine.api.dto.request;
 
+import com.capitec.connect.fraudengine.api.validation.WithinFutureSkew;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.PastOrPresent;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
@@ -37,7 +37,9 @@ public record TransactionRequestDto(
     String location,
 
     @NotNull(message = "Timestamp is required")
-    @PastOrPresent(message = "Timestamp must be in the past or present")
+    // A transaction may be a little ahead of the service clock, but not by much. Backdated
+    // transactions are accepted and evaluated at their own event time.
+    @WithinFutureSkew
     Instant timestamp
 ) {
 }

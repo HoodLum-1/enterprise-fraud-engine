@@ -85,6 +85,41 @@ class TransactionRequestDtoValidationTest {
     }
 
     @Test
+    void aTimestampWithinTheClockSkewAllowanceIsAccepted() {
+        TransactionRequestDto dto = FraudTestDataFactory.transactionRequest()
+            .timestamp(Instant.now().plus(1, ChronoUnit.MINUTES))
+            .build();
+
+        Set<ConstraintViolation<TransactionRequestDto>> violations = validator.validate(dto);
+
+        assertTrue(violations.isEmpty(), "a small clock skew should be tolerated: " + violations);
+    }
+
+    @Test
+    void aTimestampBeyondTheClockSkewAllowanceIsRejected() {
+        TransactionRequestDto dto = FraudTestDataFactory.transactionRequest()
+            .timestamp(Instant.now().plus(10, ChronoUnit.MINUTES))
+            .build();
+
+        Set<ConstraintViolation<TransactionRequestDto>> violations = validator.validate(dto);
+
+        assertFalse(violations.isEmpty());
+        assertTrue(violations.stream().anyMatch(v -> v.getPropertyPath().toString().equals("timestamp")));
+    }
+
+    @Test
+    void aBackdatedTimestampIsAccepted() {
+        // Backdated events are evaluated at their own event time, so they are not rejected.
+        TransactionRequestDto dto = FraudTestDataFactory.transactionRequest()
+            .timestamp(Instant.now().minus(3, ChronoUnit.DAYS))
+            .build();
+
+        Set<ConstraintViolation<TransactionRequestDto>> violations = validator.validate(dto);
+
+        assertTrue(violations.isEmpty(), "a backdated transaction should be accepted: " + violations);
+    }
+
+    @Test
     void testResponseDtosInstantiation() {
         UUID alertId = UUID.randomUUID();
         UUID txId = UUID.randomUUID();

@@ -103,18 +103,34 @@ The load test is for development verification, not capacity certification; the s
 
 ## Configuration and data
 
-- Main configuration: `src/main/resources/application.yml`.
+- Main configuration: `src/main/resources/application.yml`. It has **no local defaults**: a deployment must provide `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_KAFKA_BOOTSTRAP_SERVERS` and `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI`. The localhost fallbacks live in the `dev` profile only.
 - Local-only profile and seed: `application-dev.yml` and `src/main/resources/db/dev/`.
-- Versioned schema changes: `src/main/resources/db/migration/` (V1-V4). The historical V2 demo-data migration remains immutable and inserts demo rows into fresh databases; it is not removed by a later production migration. The additional V5 development seed is under `src/main/resources/db/dev/` and runs only when the `dev` profile is active.
+- Versioned schema changes: `src/main/resources/db/migration/` (V1-V4 and V6). The historical V2 demo-data migration remains immutable and inserts demo rows into fresh databases; it is not removed by a later production migration. The V5 development seed is under `src/main/resources/db/dev/` and runs only when the `dev` profile is active, which puts both locations on the Flyway path, so the two must not share a version number.
 - Integration tests use Flyway against PostgreSQL and `ddl-auto: validate`; unit tests use H2 with Flyway disabled and `create-drop`.
-- Detailed component boundaries, rule semantics, transaction/outbox behavior, and operational trade-offs are in [docs/architecture.md](docs/architecture.md).
+- Detailed component boundaries, rule semantics, transaction/outbox behavior, and operational trade-offs are in [docs/architecture.md](docs/architecture.md). The decisions are in [docs/adr](docs/adr/), and the measured performance is in [docs/performance.md](docs/performance.md).
 - The maintained API contract is [docs/openapi.yaml](docs/openapi.yaml); an importable Postman collection is in [docs/postman](docs/postman/).
 
-## Design decisions and known boundaries
+## Timestamps
 
-- The outbox prevents a successful database commit from silently losing its corresponding Kafka event, but delivery is at-least-once rather than exactly-once.
+A transaction timestamp may be up to `fraud.engine.evaluation.max-future-skew` (5 minutes by default) ahead of the service clock, which absorbs the clock skew of the systems that produce the events. A timestamp further in the future is rejected with a `400`.
+
+Backdated transactions are accepted. They are evaluated against the history as of their own event time, and they are visible to later events of the same account. Every rule window is relative to the incoming event time, never to the wall clock.
+
+## Design decisions
+
+- The outbox prevents a successful database commit from silently losing its corresponding Kafka event, but delivery is at-least-once rather than exactly-once, and unordered across events. The reasoning is in [ADR 0002](docs/adr/0002-outbox-delivery-semantics.md).
+- Concurrent evaluations of one account are serialised by a PostgreSQL advisory lock, because a lock-then-read is only correct under `READ COMMITTED`. A contended account is rejected with `503` and a `Retry-After` rather than queueing on the connection pool. The reasoning is in [ADR 0001](docs/adr/0001-per-account-advisory-locking.md).
+- There is no Redis cache in front of the history read. The read is served by an index, and the measurements are in [docs/performance.md](docs/performance.md). The reasoning is in [ADR 0003](docs/adr/0003-no-redis-cache.md).
 - REST remains available alongside Kafka ingestion for synchronous callers and operational testing.
 - Currency policy is intentionally limited to explicitly configured thresholds; add a currency threshold before accepting another currency.
 - The in-process rate limiter protects an instance, not a distributed fleet. Production deployments should enforce tenant/client quotas at an API gateway.
-- No Redis history cache, retry annotation, virtual-thread mode, distributed tracing, or correlation-ID implementation is included.
+
+## Known limitations
+
+- **Freeze thresholds are placeholders.** The freeze policy (`fraud.engine.freeze-policy`) triggers on a score or severity, and the resulting `ACCOUNT_FREEZE` command is published to Kafka for a downstream system to act on. There is no account state in this service, so a freeze is a command and an audit record, not an enforced block. The thresholds have not been calibrated against real fraud data.
+- **No dead letter replay tooling.** Messages that exhaust the Kafka error handler are published to a `<topic>-dlq` topic. They are surfaced by the `fraud_kafka_dlq_messages` metric and the `FraudEngineKafkaDeadLetters` alert, but there is no tool to inspect or replay them; that is a manual operation against the topic.
+- **No replay for parked outbox events.** An outbox row that exhausts `fraud.engine.messaging.max-attempts` is parked as `FAILED` and is never retried automatically. Replaying it means updating the row by hand.
+- **The case status API is a workflow stub.** `PATCH /api/v1/fraud-cases/{transactionId}/status` moves a case between `PENDING_REVIEW`, `CONFIRMED_FRAUD`, `FALSE_POSITIVE` and `RESOLVED` with optimistic locking. It records who changed the case and when, but there is no assignment, comment, or investigation workflow behind it.
+- **The outbox publisher drains at a fixed rate.** It claims `batch-size` rows per poll, 20 rows a second by default, so a burst of ingestion builds a backlog. The `FraudEngineOutboxBacklog` alert fires when the oldest pending row is more than five minutes old.
+- **No distributed tracing, correlation IDs, or retry annotation** are implemented.
 - Local Compose credentials, Keycloak development accounts, and sample data are for development only.

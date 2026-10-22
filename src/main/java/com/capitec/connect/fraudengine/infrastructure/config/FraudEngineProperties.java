@@ -33,6 +33,8 @@ public class FraudEngineProperties {
     @Data
     public static class Evaluation {
         private Duration historyWindow = Duration.ofHours(24);
+        /** How far a transaction timestamp may be ahead of the service clock. */
+        private Duration maxFutureSkew = Duration.ofMinutes(5);
     }
 
     @Data

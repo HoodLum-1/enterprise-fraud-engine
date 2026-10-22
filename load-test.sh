@@ -58,8 +58,25 @@ safe_bc() {
 # combined with `|| echo 0` — that produced "0\n0" and blew up the summary printf.
 count_status() {
     local code="$1" n
-    n=$(grep -c "^${code}\$" "$results_file" 2>/dev/null) || n=0
+    n=$(awk -v code="$code" '$1 == code { count++ } END { print count + 0 }' "$results_file" 2>/dev/null) || n=0
     printf '%s' "${n:-0}"
+}
+
+# Latency percentiles in milliseconds, from the recorded request times.
+latency_percentile() {
+    local percentile="$1"
+    awk -v p="$percentile" '
+        $2 != "" { print $2 * 1000 }
+    ' "$results_file" 2>/dev/null | sort -n | awk -v p="$percentile" '
+        { values[NR] = $1 }
+        END {
+            if (NR == 0) { print "n/a"; exit }
+            rank = int(p * NR / 100)
+            if (rank < 1) rank = 1
+            if (rank > NR) rank = NR
+            printf "%.1f", values[rank]
+        }
+    '
 }
 
 new_uuid() {
@@ -138,10 +155,10 @@ main() {
             if (( running < CONCURRENCY )); then break; fi
             sleep 0.02
         done
-        curl -s -w '%{http_code}\n' -o /dev/null \
+        curl -s -w '%{http_code} %{time_total}\n' -o /dev/null \
             --max-time 30 \
             -H 'Content-Type: application/json' \
-            "${AUTH_ARGS[@]}" \
+            "${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"}" \
             -d @"$workdir/req_$(printf '%05d' "$j").json" \
             "$FULL_URL" >> "$results_file" &
     done
@@ -179,6 +196,9 @@ main() {
     printf "  Duration:           %.2f seconds\n" "$duration"
     printf "  Total Requests:     %d\n" "$total"
     printf "  Throughput:         %.2f req/sec\n" "$throughput"
+    printf "  Latency p50:       %s ms\n" "$(latency_percentile 50)"
+    printf "  Latency p95:       %s ms\n" "$(latency_percentile 95)"
+    printf "  Latency p99:       %s ms\n" "$(latency_percentile 99)"
     echo "  ----------------------------------------------------------------"
     printf "  201 Created:        %d\n" "$http_201"
     printf "  409 Conflict:       %d\n" "$http_409"
