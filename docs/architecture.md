@@ -47,7 +47,11 @@ All windows and thresholds are configurable. Amount comparisons are performed on
 
 ## Persistence, event delivery, and case workflow
 
-The evaluation database transaction writes the transaction, its triggered alerts, and a typed event into `evaluation_outbox`. A scheduled publisher claims due rows with PostgreSQL `FOR UPDATE SKIP LOCKED`, publishes to Kafka, then marks rows delivered. Failed sends are retained for retry with increasing delay. This is an at-least-once delivery design: Kafka can receive a duplicate if publishing succeeds but the database acknowledgement update fails. Downstream processing must therefore be idempotent by event ID.
+The evaluation database transaction writes the transaction, its triggered alerts, and a typed event into `event_outbox`. A scheduled publisher claims a batch of due rows in a short transaction, leases them, publishes them to Kafka outside any transaction, and then records the outcome in another short transaction. No database transaction is held open across a Kafka send.
+
+Delivery is at-least-once and unordered. Kafka can receive a duplicate if publishing succeeds but the acknowledgement update fails, and a redelivery or a second publisher may interleave events, so downstream processing must be idempotent by event ID. Rows are keyed by account, so a topic's partitions keep a per-account order in the common case, but it is not guaranteed.
+
+A row that has been claimed `fraud.engine.messaging.max-attempts` times is moved to the `FAILED` parking state with its last error and is never claimed again; this keeps a poison event visible instead of retrying it forever. The lease is `batch size x send timeout + margin`, so a slow but healthy publish is not reclaimed mid-flight, and a publisher that dies leaves the row leased until the lease expires. Delivered rows are removed after `fraud.engine.messaging.retention` in bounded batches. The decision is recorded in [ADR 0002](adr/0002-outbox-delivery-semantics.md).
 
 The transaction input topic defaults to `transactions-topic`. Its JSON payload uses the same fields as `TransactionRequestDto`; the listener invokes the same evaluation path as the REST endpoint. Malformed or repeatedly failing messages follow the configured Kafka error handler/DLQ behavior.
 

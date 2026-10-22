@@ -1,6 +1,7 @@
 package com.capitec.connect.fraudengine.engine.service;
 
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
+import com.capitec.connect.fraudengine.domain.model.OutboxStatus;
 import com.capitec.connect.fraudengine.domain.model.Transaction;
 import com.capitec.connect.fraudengine.infrastructure.entity.EvaluationOutboxEntity;
 import com.capitec.connect.fraudengine.infrastructure.messaging.FraudEventProducer;
@@ -31,6 +32,7 @@ public class EvaluationOutboxService {
                 .payload(payload)
                 .createdAt(Instant.now())
                 .attempts(0)
+                .status(OutboxStatus.PENDING)
                 .build());
         } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Unable to serialize transaction evaluation event", ex);

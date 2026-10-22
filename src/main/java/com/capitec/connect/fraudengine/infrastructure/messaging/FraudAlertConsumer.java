@@ -1,6 +1,7 @@
 package com.capitec.connect.fraudengine.infrastructure.messaging;
 
 import com.capitec.connect.fraudengine.domain.model.FraudCase;
+import com.capitec.connect.fraudengine.domain.model.OutboxStatus;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
 import com.capitec.connect.fraudengine.infrastructure.entity.EvaluationOutboxEntity;
@@ -118,6 +119,7 @@ public class FraudAlertConsumer {
                     .payload(objectMapper.writeValueAsString(action))
                     .createdAt(now)
                     .attempts(0)
+                    .status(OutboxStatus.PENDING)
                     .build());
             } catch (JsonProcessingException ex) {
                 throw new IllegalStateException("Unable to serialize account freeze event", ex);

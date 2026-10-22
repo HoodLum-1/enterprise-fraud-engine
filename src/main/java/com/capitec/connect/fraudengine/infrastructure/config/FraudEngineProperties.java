@@ -27,6 +27,9 @@ public class FraudEngineProperties {
     @NestedConfigurationProperty
     private Lock lock = new Lock();
 
+    @NestedConfigurationProperty
+    private Messaging messaging = new Messaging();
+
     @Data
     public static class Evaluation {
         private Duration historyWindow = Duration.ofHours(24);
@@ -37,6 +40,36 @@ public class FraudEngineProperties {
         /** Disabled for the H2-backed unit tests, which have no advisory lock support. */
         private boolean enabled = true;
         private Duration timeout = Duration.ofSeconds(2);
+    }
+
+    @Data
+    public static class Messaging {
+        private String transactionTopic = "transactions-topic";
+        private String evaluationTopic = "fraud-alerts-topic";
+        private String accountActionsTopic = "account-actions-topic";
+        private long outboxPollDelayMs = 1000L;
+        private boolean outboxPublisherEnabled = true;
+
+        /** How many rows a publisher claims per poll. */
+        private int batchSize = 20;
+
+        /** How long a single Kafka send may take before it is treated as failed. */
+        private long sendTimeoutMs = 5000L;
+
+        /** Extra time added to the lease on top of the worst case for a whole batch. */
+        private long leaseMarginMs = 30000L;
+
+        /** How many times a row may be claimed before it is parked as FAILED. */
+        private int maxAttempts = 10;
+
+        /** How long delivered rows are kept before they are pruned. */
+        private Duration retention = Duration.ofDays(7);
+
+        /** How many rows are deleted per retention sweep. */
+        private int pruneBatchSize = 500;
+
+        /** How often the retention sweep runs. */
+        private long outboxRetentionSweepMs = 3600000L;
     }
 
     @Data

@@ -85,6 +85,13 @@ fraud:
       account-actions-topic: account-actions-topic
       outbox-poll-delay-ms: 1000
       outbox-publisher-enabled: true
+      batch-size: 20
+      send-timeout-ms: 5000
+      lease-margin-ms: 30000
+      max-attempts: 10
+      retention: P7D
+      prune-batch-size: 500
+      outbox-retention-sweep-ms: 3600000
 
 server:
   port: 8080

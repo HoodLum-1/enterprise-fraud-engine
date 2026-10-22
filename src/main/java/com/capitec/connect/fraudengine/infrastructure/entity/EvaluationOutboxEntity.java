@@ -1,7 +1,10 @@
 package com.capitec.connect.fraudengine.infrastructure.entity;
 
+import com.capitec.connect.fraudengine.domain.model.OutboxStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
@@ -46,4 +49,20 @@ public class EvaluationOutboxEntity {
 
     @Column(name = "last_error", columnDefinition = "TEXT")
     private String lastError;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    @Builder.Default
+    private OutboxStatus status = OutboxStatus.PENDING;
+
+    /** When the row was claimed by a publisher. */
+    @Column(name = "claimed_at")
+    private Instant claimedAt;
+
+    /**
+     * When the claim expires. A publisher that dies mid-publish leaves the row claimed until the
+     * lease expires, after which another publisher may claim it again.
+     */
+    @Column(name = "lease_expires_at")
+    private Instant leaseExpiresAt;
 }

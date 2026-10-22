@@ -10,7 +10,7 @@ Java 21 / Spring Boot service for synchronous transaction evaluation and asynchr
 - Velocity counts the incoming transaction plus earlier transactions in the configured window. With the default threshold of 3, 3 total transactions do not trigger and 4 do.
 - Gambling and crypto categories add 30 risk points at MEDIUM severity by default.
 - Fraud cases and the flagged-notification placeholder log are created only for evaluations that trigger a rule. No external customer-notification provider is integrated. Freeze commands are policy-gated, recorded in `freeze_audit`, and published as typed events.
-- Evaluation and freeze events use a PostgreSQL outbox. Publishing is at-least-once; consumers should use the event ID for deduplication.
+- Evaluation and freeze events use a PostgreSQL outbox. Publishing is at-least-once and unordered; consumers should use the event ID for deduplication.
 - REST and Kafka ingestion are both supported. Redis is not used.
 - Alert and case retrieval are pageable (maximum page size 100); alerts also support severity, rule-name, and event-time filters.
 
