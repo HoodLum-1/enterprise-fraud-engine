@@ -78,12 +78,12 @@ Topic names, rule settings, rate limiting, and freeze policy are configurable in
 ## Tests and developer tools
 
 ```bash
-./mvnw test
-./mvnw verify
+./mvnw test        # unit tests only, no Docker needed
+./mvnw verify      # unit + integration tests and the coverage gate, what CI runs
 docker compose config
 ```
 
-Unit tests use H2. Integration tests use Testcontainers PostgreSQL and Kafka with Flyway enabled; Docker must be available. `application-integration.yml` selects this integration configuration.
+Unit tests use H2 and run under Surefire. Integration tests use Testcontainers PostgreSQL and Kafka with Flyway enabled and run under Failsafe, so Docker must be available. `application-integration.yml` selects this integration configuration. The coverage gate covers the merged unit and integration coverage.
 
 Authenticated smoke checks require Keycloak analyst credentials:
 

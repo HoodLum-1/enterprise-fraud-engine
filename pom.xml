@@ -207,17 +207,72 @@
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
 					<argLine>@{argLine} -XX:+EnableDynamicAgentLoading</argLine>
+					<!-- The integration tests run under Failsafe, see the failsafe plugin below. -->
+					<excludes>
+						<exclude>**/*IntegrationTest.java</exclude>
+					</excludes>
 				</configuration>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<configuration>
+					<!-- Failsafe defaults to *IT, the integration tests are named *IntegrationTest. -->
+					<includes>
+						<include>**/*IntegrationTest.java</include>
+					</includes>
+					<argLine>@{argLine} -XX:+EnableDynamicAgentLoading</argLine>
+				</configuration>
+				<executions>
+					<execution>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 			<plugin>
 				<groupId>org.jacoco</groupId>
 				<artifactId>jacoco-maven-plugin</artifactId>
 				<version>0.8.12</version>
+				<configuration>
+					<dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+				</configuration>
 				<executions>
 					<execution>
+						<id>prepare-agent</id>
 						<goals>
 							<goal>prepare-agent</goal>
 						</goals>
+					</execution>
+					<execution>
+						<!-- Failsafe runs the integration tests, which need their own agent. -->
+						<id>prepare-agent-integration</id>
+						<phase>pre-integration-test</phase>
+						<goals>
+							<goal>prepare-agent-integration</goal>
+						</goals>
+					</execution>
+					<execution>
+						<!-- The coverage gate covers the unit and the integration tests together. -->
+						<id>merge</id>
+						<phase>post-integration-test</phase>
+						<goals>
+							<goal>merge</goal>
+						</goals>
+						<configuration>
+							<fileSets>
+								<fileSet>
+									<directory>${project.build.directory}</directory>
+									<includes>
+										<include>jacoco.exec</include>
+										<include>jacoco-it.exec</include>
+									</includes>
+								</fileSet>
+							</fileSets>
+							<destFile>${project.build.directory}/jacoco-merged.exec</destFile>
+						</configuration>
 					</execution>
 					<execution>
 						<id>report</id>
@@ -240,10 +295,17 @@
 										<include>com.capitec.connect.fraudengine.engine.rule</include>
 									</includes>
 									<limits>
+										<!--
+										    The rules are the part of the service where a regression is
+										    silent, so they are gated. The measured coverage of the package
+										    is 0.90 including the integration tests; the gate sits below
+										    that so an ordinary change does not break the build, but a real
+										    regression does.
+										-->
 										<limit>
 											<counter>LINE</counter>
 											<value>COVEREDRATIO</value>
-											<minimum>0.70</minimum>
+											<minimum>0.85</minimum>
 										</limit>
 									</limits>
 								</rule>

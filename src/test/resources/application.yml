@@ -37,7 +37,9 @@ spring:
       resourceserver:
         jwt:
           issuer-uri: http://localhost:8180/realms/fraud-engine
-          jwk-set-uri: http://localhost:8180/realms/fraud-engine/protocol/openid-connect/certs
+          # No jwk-set-uri here on purpose: a fixed one would point the tests at whichever
+          # Keycloak happens to run on the developer's machine. The security tests that need a
+          # real issuer register their own.
 
 fraud:
   engine:

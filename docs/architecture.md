@@ -105,8 +105,11 @@ The evaluation timer publishes client-side percentiles and a server-side histogr
 
 - Unit tests use H2, disable Flyway, and use Hibernate `create-drop`; they do not prove production-schema compatibility.
 - Integration tests use Testcontainers PostgreSQL and Kafka, run Flyway, and set Hibernate to `validate`.
-- Integration coverage includes the REST location-mismatch flow, Kafka transaction ingestion, outbox publishing, case/freeze processing, and real HTTP rate-limit and unavailable-engine responses.
-- Run all configured tests with `./mvnw test`; Docker is required for the Testcontainers suite.
+- Integration coverage includes the REST location-mismatch flow, Kafka transaction ingestion, outbox publishing, case/freeze processing, the per-account lock, and real HTTP rate-limit and unavailable-engine responses.
+- Surefire runs the unit tests and excludes `**/*IntegrationTest.java`; Failsafe runs the integration tests, so `./mvnw test` is a fast loop that needs no Docker and `./mvnw verify` runs everything. Docker is required for the Testcontainers suite.
+- The JaCoCo coverage gate runs on the merged unit and integration coverage, so the integration tests count towards it.
+- `KeycloakSecurityIntegrationTest` starts a real Keycloak with the realm from `config/keycloak`, and registers the issuer and the JWK set URI of that instance. The issuer in a token has to match the issuer the service trusts, which is why the container is given a fixed host port and the issuer is derived from it.
+- The test `application.yml` replaces the main one rather than merging with it, so any setting the tests rely on has to be repeated there.
 
 ## Deliberate scope limits
 
