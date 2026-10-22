@@ -127,4 +127,14 @@ class GlobalExceptionHandlerTest {
         assertEquals("5", response.getHeaders().getFirst("Retry-After"));
         assertEquals(503, response.getBody().getStatus());
     }
+
+    @Test
+    void accountLockTimeoutIs503WithRetryAfter() {
+        var response = exceptionHandler.handleAccountLockTimeout(
+            new AccountLockTimeoutException("ACC-1001", new RuntimeException("lock timeout")));
+
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode());
+        assertEquals("1", response.getHeaders().getFirst("Retry-After"));
+        assertEquals(503, response.getBody().getStatus());
+    }
 }

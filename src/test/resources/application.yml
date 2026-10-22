@@ -37,6 +37,10 @@ fraud:
   engine:
     evaluation:
       history-window: PT24H
+    lock:
+      # H2 has no advisory lock support; the unit tests use the no-op implementation.
+      enabled: false
+      timeout: PT2S
     rules:
       high-amount:
         enabled: true
@@ -85,6 +89,11 @@ resilience4j:
         automaticTransitionFromOpenToHalfOpenEnabled: true
         waitDurationInOpenState: 5000
         failureRateThreshold: 50
+        ignoreExceptions:
+          - com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException
+          - com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException
+          - com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException
+          - io.github.resilience4j.ratelimiter.RequestNotPermitted
   ratelimiter:
     instances:
       fraudEngine:

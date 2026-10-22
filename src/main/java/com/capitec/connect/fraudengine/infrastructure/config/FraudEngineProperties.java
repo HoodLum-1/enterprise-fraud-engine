@@ -24,9 +24,19 @@ public class FraudEngineProperties {
     @NestedConfigurationProperty
     private FreezePolicy freezePolicy = new FreezePolicy();
 
+    @NestedConfigurationProperty
+    private Lock lock = new Lock();
+
     @Data
     public static class Evaluation {
         private Duration historyWindow = Duration.ofHours(24);
+    }
+
+    @Data
+    public static class Lock {
+        /** Disabled for the H2-backed unit tests, which have no advisory lock support. */
+        private boolean enabled = true;
+        private Duration timeout = Duration.ofSeconds(2);
     }
 
     @Data

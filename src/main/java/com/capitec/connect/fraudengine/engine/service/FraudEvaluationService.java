@@ -1,6 +1,7 @@
 package com.capitec.connect.fraudengine.engine.service;
 
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
+import com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException;
 import com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException;
 import com.capitec.connect.fraudengine.api.exception.EvaluationUnavailableException;
 import com.capitec.connect.fraudengine.api.exception.RateLimitExceededException;
@@ -22,6 +23,7 @@ import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
@@ -40,19 +42,30 @@ public class FraudEvaluationService {
     private final FraudEngineProperties engineProperties;
     private final EvaluationOutboxService evaluationOutboxService;
     private final AccountHistoryService accountHistoryService;
+    private final AccountLock accountLock;
 
     /**
      * Evaluates a transaction for fraud with circuit breaker and rate limiting protection.
      * Rejects requests when the engine is unavailable rather than returning an unverified result.
      *
+     * <p>The isolation level is pinned to READ COMMITTED, which is the PostgreSQL default. The
+     * account lock serialises concurrent evaluations of the same account, and lock-then-read is
+     * only correct under READ COMMITTED: under REPEATABLE READ the second evaluation would take a
+     * snapshot taken before the first one committed and would not see the transaction it is
+     * supposed to be compared against.
+     *
      * @param dto the transaction request
      * @return evaluation summary
      */
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     @CircuitBreaker(name = "fraudEngine", fallbackMethod = "evaluateFallback")
     @RateLimiter(name = "fraudEngine")
     public EvaluationSummary evaluate(TransactionRequestDto dto) {
         log.info("Processing transaction evaluation for id: {}, accountId: {}", dto.id(), dto.accountId());
+
+        // Taken before the duplicate check and the history read so that two concurrent evaluations
+        // of the same account cannot both read a history that excludes the other's write.
+        accountLock.lockForEvaluation(dto.accountId());
 
         if (transactionRepository.existsById(dto.id())) {
             log.warn("Duplicate transaction detected with id: {}", dto.id());
@@ -100,6 +113,11 @@ public class FraudEvaluationService {
         }
         if (ex instanceof UnsupportedCurrencyException unsupportedCurrency) {
             throw unsupportedCurrency;
+        }
+        if (ex instanceof AccountLockTimeoutException lockTimeout) {
+            // Contention on one account must not open the circuit for every other caller, so the
+            // timeout is re-thrown unchanged and mapped to 503 by the exception handler.
+            throw lockTimeout;
         }
         if (ex instanceof CallNotPermittedException) {
             log.warn("Circuit breaker is open for transaction evaluation {}", dto.id());

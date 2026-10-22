@@ -1,6 +1,7 @@
 package com.capitec.connect.fraudengine.engine.service;
 
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
+import com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException;
 import com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.domain.model.FraudAlert;
@@ -25,10 +26,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -58,6 +62,9 @@ class FraudEvaluationServiceTest {
 
     @Mock
     private EvaluationOutboxService evaluationOutboxService;
+
+    @Mock
+    private AccountLock accountLock;
 
     @Spy
     private TransactionMapper transactionMapper = new TransactionMapper();
@@ -248,5 +255,50 @@ class FraudEvaluationServiceTest {
         verify(transactionRepository, never()).save(any());
         verify(fraudAlertRepository, never()).saveAll(any());
         verifyNoInteractions(evaluationOutboxService);
+    }
+
+    @Test
+    void accountLockIsTakenBeforeTheDuplicateCheckAndTheHistoryRead() {
+        when(transactionRepository.existsById(txId)).thenReturn(false);
+        when(accountHistoryService.findHistory(eq("ACC-1001"), any(Instant.class), any(Instant.class)))
+            .thenReturn(List.of());
+        when(fraudEngine.evaluate(any(Transaction.class), anyList())).thenReturn(
+            FraudTestDataFactory.evaluationSummary(txId, "ACC-1001", 0, Severity.LOW, List.of(), List.of())
+        );
+
+        fraudEvaluationService.evaluate(requestDto);
+
+        InOrder order = inOrder(accountLock, transactionRepository, accountHistoryService);
+        order.verify(accountLock).lockForEvaluation("ACC-1001");
+        order.verify(transactionRepository).existsById(txId);
+        order.verify(accountHistoryService).findHistory(eq("ACC-1001"), any(Instant.class), any(Instant.class));
+    }
+
+    @Test
+    void accountLockTimeoutIsRethrownUnchangedSoItIsNotReportedAsAnEngineOutage() {
+        AccountLockTimeoutException timeout =
+            new AccountLockTimeoutException("ACC-1001", new IllegalStateException("lock timeout"));
+
+        AccountLockTimeoutException thrown = assertThrows(AccountLockTimeoutException.class,
+            () -> fraudEvaluationService.evaluateFallback(requestDto, timeout));
+
+        assertSame(timeout, thrown);
+        verify(transactionRepository, never()).save(any());
+        verifyNoInteractions(evaluationOutboxService);
+    }
+
+    /**
+     * The account lock serialises concurrent evaluations of one account, and lock-then-read is
+     * only correct under READ COMMITTED. This guards the isolation level against a later change
+     * to REPEATABLE READ or SERIALIZABLE.
+     */
+    @Test
+    void evaluationIsPinnedToReadCommittedIsolation() throws Exception {
+        Transactional transactional = FraudEvaluationService.class
+            .getMethod("evaluate", TransactionRequestDto.class)
+            .getAnnotation(Transactional.class);
+
+        assertNotNull(transactional);
+        assertEquals(Isolation.READ_COMMITTED, transactional.isolation());
     }
 }

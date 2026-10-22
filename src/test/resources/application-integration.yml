@@ -11,5 +11,9 @@ spring:
 
 fraud:
   engine:
+    lock:
+      # The integration tests run against PostgreSQL, which supports advisory locks.
+      enabled: true
+      timeout: PT2S
     messaging:
       outbox-publisher-enabled: true

@@ -49,6 +49,9 @@ fraud:
   engine:
     evaluation:
       history-window: PT24H
+    lock:
+      enabled: true
+      timeout: PT2S
     rules:
       high-amount:
         enabled: true
@@ -138,6 +141,8 @@ resilience4j:
         ignoreExceptions:
           - com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException
           - com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException
+          # Contention on one account must not open the circuit for every other caller.
+          - com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException
           - io.github.resilience4j.ratelimiter.RequestNotPermitted
           - jakarta.validation.ConstraintViolationException
           - org.springframework.web.bind.MethodArgumentNotValidException

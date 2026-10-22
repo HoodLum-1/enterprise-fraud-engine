@@ -151,6 +151,26 @@ public class GlobalExceptionHandler {
             .body(problemDetail);
     }
 
+    /**
+     * A contended account is a load signal rather than a dependency failure. It is reported as
+     * 503 with a short {@code Retry-After} so the caller backs off briefly, and it is explicitly
+     * excluded from the circuit breaker's recorded failures.
+     */
+    @ExceptionHandler(AccountLockTimeoutException.class)
+    public ResponseEntity<ProblemDetail> handleAccountLockTimeout(AccountLockTimeoutException ex) {
+        log.warn("Account evaluation lock timed out: {}", ex.getMessage());
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            "The account is busy with other evaluations. Retry the request shortly."
+        );
+        problemDetail.setTitle("Service Unavailable");
+        problemDetail.setType(URI.create("https://api.capitec.com/errors/account-busy"));
+        problemDetail.setProperty("timestamp", Instant.now());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+            .header(HttpHeaders.RETRY_AFTER, "1")
+            .body(problemDetail);
+    }
+
     @ExceptionHandler(Exception.class)
     public ProblemDetail handleGeneralException(Exception ex) {
         log.error("An unexpected error occurred", ex);

@@ -26,6 +26,14 @@ This is a layered application with domain-focused packages and ports/adapters at
 
 `FraudEvaluationService` first checks idempotency, then loads prior account transactions using the incoming transaction's event timestamp and configured `fraud.engine.evaluation.history-window`. The incoming transaction ID is excluded from history. It evaluates before saving the transaction, then persists the transaction, triggered alerts, and `TRANSACTION_EVALUATED` outbox record in one database transaction. A concurrent duplicate that passes the initial check is rejected by the database primary key and normalized to `409 Conflict`.
 
+### Per-account concurrency
+
+Concurrent evaluations of the same account are serialised by a PostgreSQL transaction-scoped advisory lock, taken before the duplicate check and before the history read. Without it, two concurrent evaluations would each read a history that excludes the other's uncommitted write, and the velocity and location-mismatch rules could both be missed.
+
+The lock is acquired with a `lock_timeout` (default `PT2S`, `fraud.engine.lock.timeout`). A contended account fails fast with `AccountLockTimeoutException`, which is reported as `503` with `Retry-After: 1` rather than parking a request on one of the 20 Hikari connections. The timeout is not a `DataAccessException` and is listed in the circuit breaker's `ignoreExceptions`, so contention on one account cannot open the circuit for every other caller.
+
+The evaluation runs at `READ COMMITTED`, pinned on the `@Transactional` annotation, because lock-then-read is only correct under that isolation level. Advisory locks are PostgreSQL-only, so the lock sits behind the `AccountLock` interface and the H2-backed unit tests use a no-op implementation (`fraud.engine.lock.enabled=false`). The decision is recorded in [ADR 0001](adr/0001-per-account-advisory-locking.md).
+
 Rules are independent `FraudRule` components, ordered by Spring `@Order`. Each triggered rule contributes its configured risk points; `FraudEngine` derives overall severity from the combined score. Configuration and enabled flags are in `FraudEngineProperties` and `application.yml`.
 
 | Rule | Inputs and window | Default condition | Default score / severity |
@@ -77,6 +85,7 @@ Actuator exposes health, info, metrics, and Prometheus endpoints; health details
 |---|---|
 | REST request/response and RFC 7807 errors | `api.controller`, `api.dto`, `api.exception` |
 | Evaluation orchestration and rule components | `engine.service`, `engine.rule` |
+| Per-account evaluation lock | `engine.service.AccountLock`, `infrastructure.lock` |
 | Domain records and case state | `domain.model` |
 | JPA entities, repositories, Flyway migrations | `infrastructure.entity`, `infrastructure.repository`, `db/migration` |
 | JWT resource server and account ownership | `infrastructure.config.SecurityConfig`, `infrastructure.security` |
