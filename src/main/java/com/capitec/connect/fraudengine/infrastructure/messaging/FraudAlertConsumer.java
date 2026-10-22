@@ -8,6 +8,7 @@ import com.capitec.connect.fraudengine.infrastructure.entity.EvaluationOutboxEnt
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudCaseEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.FreezeAuditEntity;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudCaseMapper;
+import com.capitec.connect.fraudengine.infrastructure.metrics.FraudMetrics;
 import com.capitec.connect.fraudengine.infrastructure.repository.EvaluationOutboxRepository;
 import com.capitec.connect.fraudengine.infrastructure.repository.FraudCaseRepository;
 import com.capitec.connect.fraudengine.infrastructure.repository.FreezeAuditRepository;
@@ -37,6 +38,7 @@ public class FraudAlertConsumer {
     private final EvaluationOutboxRepository outboxRepository;
     private final FraudEngineProperties engineProperties;
     private final ObjectMapper objectMapper;
+    private final FraudMetrics fraudMetrics;
 
     @Transactional
     @KafkaListener(
@@ -74,6 +76,7 @@ public class FraudAlertConsumer {
                     event.getOverallSeverity()
             );
             FraudCaseEntity saved = fraudCaseRepository.save(fraudCaseMapper.toEntity(newCase));
+            fraudMetrics.recordCaseCreated();
             log.info("Persisted new fraud case ID {} for transaction {} with severity {} and risk score {}",
                     saved.getId(), event.getTransactionId(), event.getOverallSeverity(), event.getTotalRiskScore());
         }
@@ -83,6 +86,7 @@ public class FraudAlertConsumer {
             && (event.getTotalRiskScore() >= policy.getMinimumRiskScore()
                 || (event.getOverallSeverity() != null
                     && event.getOverallSeverity().ordinal() >= policy.getMinimumSeverity().ordinal()));
+        fraudMetrics.recordFreezeDecision(freezeEligible);
 
         if (freezeEligible && !freezeAuditRepository.existsByTransactionId(event.getTransactionId())) {
             log.warn("AUTOMATED MITIGATION: Transaction {} from account {} is CRITICAL/HIGH risk "

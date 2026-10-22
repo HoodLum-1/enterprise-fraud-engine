@@ -2,6 +2,7 @@ package com.capitec.connect.fraudengine.infrastructure.messaging;
 
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
 import com.capitec.connect.fraudengine.infrastructure.entity.EvaluationOutboxEntity;
+import com.capitec.connect.fraudengine.infrastructure.metrics.FraudMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +38,7 @@ public class EvaluationOutboxPublisher {
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final ObjectMapper objectMapper;
     private final FraudEngineProperties properties;
+    private final FraudMetrics fraudMetrics;
 
     @Scheduled(fixedDelayString = "${fraud.engine.messaging.outbox-poll-delay-ms:1000}")
     public void publishPendingEvents() {
@@ -69,6 +71,7 @@ public class EvaluationOutboxPublisher {
             kafkaTemplate.send(event.topic(), row.getEventKey(), event.payload())
                 .get(properties.getMessaging().getSendTimeoutMs(), TimeUnit.MILLISECONDS);
             outboxStore.acknowledge(row.getId());
+            fraudMetrics.recordOutboxPublish("published");
         } catch (Exception ex) {
             handleFailure(row, ex);
         }
@@ -80,12 +83,14 @@ public class EvaluationOutboxPublisher {
 
         if (attempts >= messaging.getMaxAttempts()) {
             outboxStore.park(row.getId(), ex.getMessage());
+            fraudMetrics.recordOutboxPublish("parked");
             log.error("Outbox event {} parked as FAILED after {} attempts and will not be retried",
                 row.getId(), attempts, ex);
             return;
         }
 
         outboxStore.reschedule(row.getId(), Instant.now().plus(retryDelay(attempts)), ex.getMessage());
+        fraudMetrics.recordOutboxPublish("failed");
         log.warn("Outbox event {} failed on attempt {}, retrying in {}", row.getId(), attempts,
             retryDelay(attempts), ex);
     }

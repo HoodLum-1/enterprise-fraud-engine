@@ -83,6 +83,12 @@ Redis was removed because the previous cache was invalidated on every write-path
 
 Actuator exposes health, info, metrics, and Prometheus endpoints; health details are hidden. The application does not currently implement Retry, virtual threads, OpenTelemetry tracing, or correlation IDs.
 
+### Metrics and alerting
+
+`infrastructure.metrics` publishes low-cardinality metrics: the evaluation duration timer and outcome counter, rejection counters split by reason (rate limit, circuit open, lock timeout, engine unavailable), the per-account lock wait timer, freeze decisions, cases created, outbox publish results, and gauges for the outbox backlog, the age of the oldest pending row and the dead letter depth. `resilience4j-micrometer` publishes the circuit breaker state and the rate limiter availability.
+
+The evaluation timer publishes client-side percentiles and a server-side histogram, so a p95 can be read from the histogram buckets across instances. Prometheus alert rules for the outbox backlog, parked events, dead letters, an open circuit breaker, rate limit rejections and lock contention are in [ops/prometheus/alerts.yml](../ops/prometheus/alerts.yml), with the scrape configuration next to it. The `observability` Compose profile starts a Prometheus with those rules.
+
 ## Main components
 
 | Concern | Location |

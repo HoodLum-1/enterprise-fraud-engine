@@ -3,6 +3,7 @@ package com.capitec.connect.fraudengine.infrastructure.messaging;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
 import com.capitec.connect.fraudengine.infrastructure.entity.EvaluationOutboxEntity;
+import com.capitec.connect.fraudengine.infrastructure.metrics.FraudMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,7 +12,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.SendResult;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -46,7 +47,8 @@ class EvaluationOutboxPublisherTest {
     void setUp() {
         objectMapper = new ObjectMapper().findAndRegisterModules();
         properties = new FraudEngineProperties();
-        publisher = new EvaluationOutboxPublisher(outboxStore, kafkaTemplate, objectMapper, properties);
+        publisher = new EvaluationOutboxPublisher(outboxStore, kafkaTemplate, objectMapper, properties,
+            new FraudMetrics(new SimpleMeterRegistry()));
     }
 
     @Test

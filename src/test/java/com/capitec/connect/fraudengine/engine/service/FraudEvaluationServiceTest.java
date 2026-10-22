@@ -15,12 +15,14 @@ import com.capitec.connect.fraudengine.infrastructure.mapper.TransactionMapper;
 import com.capitec.connect.fraudengine.infrastructure.repository.FraudAlertRepository;
 import com.capitec.connect.fraudengine.infrastructure.repository.TransactionRepository;
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
+import com.capitec.connect.fraudengine.infrastructure.metrics.FraudMetrics;
 import com.capitec.connect.fraudengine.infrastructure.messaging.FraudEventProducer;
 
 import com.capitec.connect.fraudengine.util.FraudTestDataFactory;
 import com.capitec.connect.fraudengine.api.exception.RateLimitExceededException;
 import com.capitec.connect.fraudengine.api.exception.EvaluationUnavailableException;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -65,6 +67,9 @@ class FraudEvaluationServiceTest {
 
     @Mock
     private AccountLock accountLock;
+
+    @Spy
+    private FraudMetrics fraudMetrics = new FraudMetrics(new SimpleMeterRegistry());
 
     @Spy
     private TransactionMapper transactionMapper = new TransactionMapper();

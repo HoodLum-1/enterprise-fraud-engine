@@ -92,6 +92,9 @@ fraud:
       retention: P7D
       prune-batch-size: 500
       outbox-retention-sweep-ms: 3600000
+      outbox-metrics-refresh-ms: 10000
+      dlq-metrics-enabled: true
+      dlq-metrics-refresh-ms: 30000
 
 server:
   port: 8080
@@ -107,6 +110,16 @@ management:
   endpoint:
     health:
       show-details: never
+  metrics:
+    distribution:
+      percentiles-histogram:
+        # Server-side histogram, so the evaluation percentiles can be aggregated across instances.
+        fraud:
+          evaluation:
+            duration: true
+          account:
+            lock:
+              wait: true
 
 # Logging Configuration
 logging:

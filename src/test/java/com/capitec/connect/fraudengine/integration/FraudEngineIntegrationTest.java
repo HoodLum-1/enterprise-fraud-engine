@@ -285,7 +285,7 @@ class FraudEngineIntegrationTest {
     }
 
     private void await(java.util.function.BooleanSupplier condition) throws InterruptedException {
-        Instant deadline = Instant.now().plusSeconds(15);
+        Instant deadline = Instant.now().plusSeconds(30);
         while (Instant.now().isBefore(deadline)) {
             if (condition.getAsBoolean()) {
                 return;

@@ -104,5 +104,19 @@ services:
       retries: 12
       start_period: 60s
 
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: fraud_prometheus
+    profiles: ["observability"]
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    ports:
+      - '${PROMETHEUS_PORT:-9090}:9090'
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      # Mount a file containing a bearer token for the authenticated /actuator/prometheus endpoint.
+      - ./ops/prometheus/fraud-engine.token:/etc/prometheus/fraud-engine.token:ro
+
 volumes:
   postgres_data:

@@ -14,6 +14,12 @@ spring:
     enabled: false
   kafka:
     bootstrap-servers: localhost:9092
+    consumer:
+      # Mirrors the main configuration. Without it the consumer falls back to the Kafka default of
+      # "latest" and skips any message that was produced before the consumer was assigned the
+      # partition, which made the Kafka ingestion test depend on a startup race.
+      group-id: fraud-engine-transactions
+      auto-offset-reset: earliest
     listener:
       auto-startup: false
     producer:
@@ -81,6 +87,10 @@ fraud:
       retention: P7D
       prune-batch-size: 500
       outbox-retention-sweep-ms: 3600000
+      outbox-metrics-refresh-ms: 10000
+      # The unit tests have no broker, so the dead letter depth is not collected.
+      dlq-metrics-enabled: false
+      dlq-metrics-refresh-ms: 30000
 
 security:
   enabled: false
@@ -116,3 +126,12 @@ management:
   endpoint:
     health:
       show-details: never
+  metrics:
+    distribution:
+      percentiles-histogram:
+        fraud:
+          evaluation:
+            duration: true
+          account:
+            lock:
+              wait: true

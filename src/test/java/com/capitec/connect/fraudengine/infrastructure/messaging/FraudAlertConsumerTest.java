@@ -6,6 +6,7 @@ import com.capitec.connect.fraudengine.infrastructure.entity.EvaluationOutboxEnt
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudCaseEntity;
 import com.capitec.connect.fraudengine.infrastructure.repository.EvaluationOutboxRepository;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudCaseMapper;
+import com.capitec.connect.fraudengine.infrastructure.metrics.FraudMetrics;
 import com.capitec.connect.fraudengine.infrastructure.repository.FraudCaseRepository;
 import com.capitec.connect.fraudengine.infrastructure.repository.FreezeAuditRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.mockito.Spy;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -42,6 +45,9 @@ class FraudAlertConsumerTest {
 
     @Mock
     private ObjectMapper objectMapper;
+
+    @Spy
+    private FraudMetrics fraudMetrics = new FraudMetrics(new SimpleMeterRegistry());
 
     @InjectMocks
     private FraudAlertConsumer fraudAlertConsumer;

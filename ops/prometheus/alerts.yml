@@ -1,0 +1,68 @@
+groups:
+  - name: fraud-engine
+    rules:
+      - alert: FraudEngineOutboxBacklog
+        expr: fraud_outbox_oldest_pending_age_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Fraud Engine outbox backlog is not being drained"
+          description: >-
+            The oldest unpublished outbox row is {{ $value | humanizeDuration }} old, which is
+            longer than the 5 minute target. The outbox publisher is probably stopped or failing.
+
+      - alert: FraudEngineOutboxParkedEvents
+        expr: increase(fraud_outbox_publish_total{result="parked"}[15m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fraud Engine parked outbox events"
+          description: >-
+            {{ $value }} outbox event(s) exhausted their retry budget and were parked as FAILED.
+            They are not retried automatically and have to be replayed by hand.
+
+      - alert: FraudEngineKafkaDeadLetters
+        expr: fraud_kafka_dlq_messages > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Fraud Engine has dead lettered Kafka messages"
+          description: >-
+            {{ $value }} message(s) are sitting in a dead letter topic. They were not processed
+            and need to be inspected.
+
+      - alert: FraudEngineCircuitBreakerOpen
+        expr: resilience4j_circuitbreaker_state{name="fraudEngine",state="open"} == 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fraud Engine circuit breaker is open"
+          description: >-
+            The fraudEngine circuit breaker is open, so every evaluation is being rejected with
+            503. The dependency it protects is failing.
+
+      - alert: FraudEngineEvaluationRejections
+        expr: rate(fraud_evaluation_rejections_total{reason="rate_limit"}[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Fraud Engine is rate limiting evaluations"
+          description: >-
+            More than one evaluation per second is being rejected by the rate limiter. The limit
+            is process local, so a single instance is saturating.
+
+      - alert: FraudEngineAccountLockContention
+        expr: rate(fraud_account_lock_wait_seconds_count{outcome="timeout"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Fraud Engine is timing out on the per-account lock"
+          description: >-
+            Evaluations are timing out waiting for the per-account advisory lock, which means one
+            account is generating more concurrent evaluations than the lock timeout allows.

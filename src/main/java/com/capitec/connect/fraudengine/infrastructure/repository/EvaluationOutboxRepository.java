@@ -1,5 +1,6 @@
 package com.capitec.connect.fraudengine.infrastructure.repository;
 
+import com.capitec.connect.fraudengine.domain.model.OutboxStatus;
 import com.capitec.connect.fraudengine.infrastructure.entity.EvaluationOutboxEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -12,6 +13,11 @@ import java.util.UUID;
 
 public interface EvaluationOutboxRepository extends JpaRepository<EvaluationOutboxEntity, UUID> {
     long countByEventType(String eventType);
+
+    long countByStatus(OutboxStatus status);
+
+    @Query("SELECT MIN(e.createdAt) FROM EvaluationOutboxEntity e WHERE e.status = :status")
+    Instant findOldestCreatedAtByStatus(@Param("status") OutboxStatus status);
 
     /**
      * Claims pending rows for publishing. The row lock is released as soon as the claiming

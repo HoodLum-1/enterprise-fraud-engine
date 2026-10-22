@@ -12,6 +12,7 @@ import com.capitec.connect.fraudengine.engine.FraudEngine;
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudAlertEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.TransactionEntity;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
+import com.capitec.connect.fraudengine.infrastructure.metrics.FraudMetrics;
 import com.capitec.connect.fraudengine.infrastructure.mapper.TransactionMapper;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
@@ -25,6 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import io.micrometer.core.instrument.Timer;
 
 import java.time.Instant;
 import java.util.List;
@@ -43,6 +45,7 @@ public class FraudEvaluationService {
     private final EvaluationOutboxService evaluationOutboxService;
     private final AccountHistoryService accountHistoryService;
     private final AccountLock accountLock;
+    private final FraudMetrics fraudMetrics;
 
     /**
      * Evaluates a transaction for fraud with circuit breaker and rate limiting protection.
@@ -62,6 +65,7 @@ public class FraudEvaluationService {
     @RateLimiter(name = "fraudEngine")
     public EvaluationSummary evaluate(TransactionRequestDto dto) {
         log.info("Processing transaction evaluation for id: {}, accountId: {}", dto.id(), dto.accountId());
+        Timer.Sample sample = fraudMetrics.startEvaluation();
 
         // Taken before the duplicate check and the history read so that two concurrent evaluations
         // of the same account cannot both read a history that excludes the other's write.
@@ -92,6 +96,7 @@ public class FraudEvaluationService {
         }
 
         evaluationOutboxService.enqueueEvaluation(transaction, summary);
+        fraudMetrics.recordEvaluation(sample, summary.isFraudulent());
 
         return summary;
     }
@@ -106,6 +111,7 @@ public class FraudEvaluationService {
     EvaluationSummary evaluateFallback(TransactionRequestDto dto, Exception ex) {
         if (ex instanceof RequestNotPermitted) {
             log.warn("Rate limit rejected transaction evaluation for {}", dto.id());
+            fraudMetrics.recordRejection("rate_limit");
             throw new RateLimitExceededException(ex);
         }
         if (ex instanceof DuplicateTransactionException duplicate) {
@@ -117,12 +123,15 @@ public class FraudEvaluationService {
         if (ex instanceof AccountLockTimeoutException lockTimeout) {
             // Contention on one account must not open the circuit for every other caller, so the
             // timeout is re-thrown unchanged and mapped to 503 by the exception handler.
+            fraudMetrics.recordRejection("lock_timeout");
             throw lockTimeout;
         }
         if (ex instanceof CallNotPermittedException) {
             log.warn("Circuit breaker is open for transaction evaluation {}", dto.id());
+            fraudMetrics.recordRejection("circuit_open");
         } else {
             log.error("Fraud evaluation unavailable for transaction {}: {}", dto.id(), ex.getMessage(), ex);
+            fraudMetrics.recordRejection("engine_unavailable");
         }
         throw new EvaluationUnavailableException(ex);
     }

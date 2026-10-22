@@ -17,3 +17,5 @@ fraud:
       timeout: PT2S
     messaging:
       outbox-publisher-enabled: true
+      # The integration tests have a broker, so the dead letter depth is collected.
+      dlq-metrics-enabled: true

@@ -1,0 +1,20 @@
+# Scrape configuration for the Fraud Engine.
+#
+# The Prometheus endpoint is authenticated, so a bearer token has to be supplied. The token file is
+# mounted from the host; see the observability profile in compose.yaml.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - alerts.yml
+
+scrape_configs:
+  - job_name: fraud-engine
+    metrics_path: /actuator/prometheus
+    bearer_token_file: /etc/prometheus/fraud-engine.token
+    static_configs:
+      - targets:
+          - fraud-engine:8080
+        labels:
+          service: fraud-engine
