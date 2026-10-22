@@ -104,6 +104,7 @@ The load test is for development verification, not capacity certification; the s
 ## Configuration and data
 
 - Main configuration: `src/main/resources/application.yml`. It has **no local defaults**: a deployment must provide `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `SPRING_KAFKA_BOOTSTRAP_SERVERS` and `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI`. The localhost fallbacks live in the `dev` profile only.
+- All the variables, with the local development values, are listed in [`.env.example`](.env.example). Copy it to `.env` (`cp .env.example .env`) and load it with `set -a && . ./.env && set +a`. The `.env` file is git ignored, and Docker Compose reads it for the port substitutions.
 - Local-only profile and seed: `application-dev.yml` and `src/main/resources/db/dev/`.
 - Versioned schema changes: `src/main/resources/db/migration/` (V1-V4 and V6). The historical V2 demo-data migration remains immutable and inserts demo rows into fresh databases; it is not removed by a later production migration. The V5 development seed is under `src/main/resources/db/dev/` and runs only when the `dev` profile is active, which puts both locations on the Flyway path, so the two must not share a version number.
 - Integration tests use Flyway against PostgreSQL and `ddl-auto: validate`; unit tests use H2 with Flyway disabled and `create-drop`.

@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Local environment, holds credentials. The template is committed as .env.example
+.env
