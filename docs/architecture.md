@@ -45,6 +45,8 @@ Rules are independent `FraudRule` components, ordered by Spring `@Order`. Each t
 
 All windows and thresholds are configurable. Amount comparisons are performed only against a configured threshold for the transaction currency; there is no implicit currency conversion.
 
+Every window is relative to the incoming event time, never to the wall clock. A transaction timestamp may be up to `fraud.engine.evaluation.max-future-skew` (5 minutes by default) ahead of the service clock, and is rejected with a `400` beyond that. Backdated transactions are accepted and are evaluated against the history as of their own event time.
+
 ## Persistence, event delivery, and case workflow
 
 The evaluation database transaction writes the transaction, its triggered alerts, and a typed event into `event_outbox`. A scheduled publisher claims a batch of due rows in a short transaction, leases them, publishes them to Kafka outside any transaction, and then records the outcome in another short transaction. No database transaction is held open across a Kafka send.
