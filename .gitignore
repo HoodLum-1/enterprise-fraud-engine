@@ -34,3 +34,4 @@ build/
 
 # Local environment, holds credentials. The template is committed as .env.example
 .env
+ops/prometheus/fraud-engine.token
