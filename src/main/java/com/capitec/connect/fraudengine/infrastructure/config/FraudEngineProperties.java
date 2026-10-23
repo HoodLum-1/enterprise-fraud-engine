@@ -35,6 +35,8 @@ public class FraudEngineProperties {
         private Duration historyWindow = Duration.ofHours(24);
         /** How far a transaction timestamp may be ahead of the service clock. */
         private Duration maxFutureSkew = Duration.ofMinutes(5);
+        /** How far a transaction timestamp may be in the past. */
+        private Duration maxPastSkew = Duration.ofDays(7);
     }
 
     @Data
@@ -92,7 +94,9 @@ public class FraudEngineProperties {
     @Data
     public static class HighAmount {
         private boolean enabled = true;
-        private Map<String, BigDecimal> thresholds = Map.of("ZAR", new BigDecimal("50000.00"));
+        private Map<String, BigDecimal> thresholds = Map.of(
+            "ZAR", new BigDecimal("50000.00"),
+            "USD", new BigDecimal("2500.00"));
         private int riskScore = 40;
         private Severity severity = Severity.HIGH;
     }
@@ -103,6 +107,14 @@ public class FraudEngineProperties {
         private java.util.Set<String> categories = java.util.Set.of("GAMBLING", "CRYPTO");
         private int riskScore = 30;
         private Severity severity = Severity.MEDIUM;
+        /** Per-category overrides. Key is case-insensitive. */
+        private java.util.Map<String, CategoryRiskOverride> overrides = java.util.Map.of();
+    }
+
+    @Data
+    public static class CategoryRiskOverride {
+        private Integer riskScore;
+        private Severity severity;
     }
 
     @Data

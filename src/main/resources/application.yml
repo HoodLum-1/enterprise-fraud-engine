@@ -52,6 +52,7 @@ fraud:
     evaluation:
       history-window: PT24H
       max-future-skew: PT5M
+    max-past-skew: P7D
     lock:
       enabled: true
       timeout: PT2S
@@ -60,6 +61,7 @@ fraud:
         enabled: true
         thresholds:
           ZAR: 50000.00
+          USD: 2500.00
         risk-score: 40
         severity: HIGH
       category-risk:
@@ -67,6 +69,7 @@ fraud:
         categories: [GAMBLING, CRYPTO]
         risk-score: 30
         severity: MEDIUM
+        overrides: {}
       velocity:
         enabled: true
         threshold: 3

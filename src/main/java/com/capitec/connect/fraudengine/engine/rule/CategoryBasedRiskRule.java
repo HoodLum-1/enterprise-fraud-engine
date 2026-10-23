@@ -47,19 +47,39 @@ public class CategoryBasedRiskRule implements FraudRule {
         }
 
         FraudEngineProperties.CategoryRisk config = properties.getRules().getCategoryRisk();
+        String categoryKey = currentTransaction.category().trim().toUpperCase(Locale.ROOT);
         boolean highRisk = config.getCategories().stream()
             .filter(category -> category != null)
             .map(category -> category.toUpperCase(Locale.ROOT))
-            .anyMatch(category -> category.equals(currentTransaction.category().trim().toUpperCase(Locale.ROOT)));
+            .anyMatch(category -> category.equals(categoryKey));
 
         if (!highRisk) {
             return notTriggered();
         }
+
+        int riskScore = config.getRiskScore();
+        Severity severity = config.getSeverity();
+        if (config.getOverrides() != null) {
+            FraudEngineProperties.CategoryRiskOverride override = config.getOverrides().entrySet().stream()
+                .filter(entry -> entry.getKey() != null && entry.getKey().trim().toUpperCase(Locale.ROOT).equals(categoryKey))
+                .map(java.util.Map.Entry::getValue)
+                .findFirst()
+                .orElse(null);
+            if (override != null) {
+                if (override.getRiskScore() != null) {
+                    riskScore = override.getRiskScore();
+                }
+                if (override.getSeverity() != null) {
+                    severity = override.getSeverity();
+                }
+            }
+        }
+
         return new RuleEvaluationResult(
             RULE_NAME,
             true,
-            config.getRiskScore(),
-            config.getSeverity(),
+            riskScore,
+            severity,
             "Transaction category '" + currentTransaction.category() + "' is configured as high risk"
         );
     }

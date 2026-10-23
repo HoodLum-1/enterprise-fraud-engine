@@ -32,14 +32,24 @@ public class WithinFutureSkewValidator implements ConstraintValidator<WithinFutu
         if (value == null) {
             return true;
         }
-        Duration allowance = properties.getEvaluation().getMaxFutureSkew();
-        if (!value.isAfter(Instant.now().plus(allowance))) {
-            return true;
+        Instant now = Instant.now();
+        Duration futureAllowance = properties.getEvaluation().getMaxFutureSkew();
+        if (value.isAfter(now.plus(futureAllowance))) {
+            context.disableDefaultConstraintViolation();
+            context.buildConstraintViolationWithTemplate(
+                    "Timestamp must not be more than " + futureAllowance.toSeconds() + " seconds in the future")
+                .addConstraintViolation();
+            return false;
         }
-        context.disableDefaultConstraintViolation();
-        context.buildConstraintViolationWithTemplate(
-                "Timestamp must not be more than " + allowance.toSeconds() + " seconds in the future")
-            .addConstraintViolation();
-        return false;
+
+        Duration pastAllowance = properties.getEvaluation().getMaxPastSkew();
+        if (pastAllowance != null && value.isBefore(now.minus(pastAllowance))) {
+            context.disableDefaultConstraintViolation();
+            context.buildConstraintViolationWithTemplate(
+                    "Timestamp must not be more than " + pastAllowance.toDays() + " days in the past")
+                .addConstraintViolation();
+            return false;
+        }
+        return true;
     }
 }

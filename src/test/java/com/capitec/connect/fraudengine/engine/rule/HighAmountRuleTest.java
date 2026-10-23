@@ -80,9 +80,20 @@ class HighAmountRuleTest {
 
     @Test
     void shouldRejectCurrenciesWithoutConfiguredThreshold() {
-        Transaction tx = FraudTestDataFactory.transaction().currency("USD").build();
+        Transaction tx = FraudTestDataFactory.transaction().currency("EUR").build();
 
         assertThrows(com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException.class,
             () -> rule.evaluate(tx, List.of()));
+    }
+
+    @Test
+    void shouldTriggerForConfiguredUsdAmount() {
+        Transaction tx = FraudTestDataFactory.transaction().currency("USD").amount(new BigDecimal("2500.01")).build();
+
+        RuleEvaluationResult result = rule.evaluate(tx, List.of());
+
+        assertTrue(result.isTriggered());
+        assertEquals(40, result.riskScore());
+        assertEquals(Severity.HIGH, result.severity());
     }
 }

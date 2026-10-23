@@ -4,9 +4,9 @@ Java 21 / Spring Boot service for synchronous transaction evaluation and asynchr
 
 ## Capabilities
 
-- Ordered, configurable rules: high amount, transaction velocity, recent location mismatch, and high-risk merchant category.
+- Ordered, configurable rules: high amount, transaction velocity, recent location mismatch, and high-risk merchant category. Category risks can be overridden per category with `fraud.engine.rules.category-risk.overrides`.
 - Rule history is read using the incoming event time, before saving the incoming transaction; the current transaction is excluded from its own history.
-- Amount thresholds are currency-specific. The default policy supports ZAR with a threshold of ZAR 50,000; unconfigured currencies are rejected rather than compared as if they were ZAR.
+- Amount thresholds are currency-specific. The default policy supports ZAR (50,000) and USD (2,500); unconfigured currencies are rejected rather than compared as if they were ZAR.
 - Velocity counts the incoming transaction plus earlier transactions in the configured window. With the default threshold of 3, 3 total transactions do not trigger and 4 do.
 - Gambling and crypto categories add 30 risk points at MEDIUM severity by default.
 - Fraud cases and the flagged-notification placeholder log are created only for evaluations that trigger a rule. No external customer-notification provider is integrated. Freeze commands are policy-gated, recorded in `freeze_audit`, and published as typed events.
@@ -109,13 +109,13 @@ The load test is for development verification, not capacity certification; the s
 - Versioned schema changes: `src/main/resources/db/migration/` (V1-V4, V6 and V7). The historical V2 demo-data migration remains immutable and inserts demo rows into fresh databases; V7 removes those rows again, so a production database is left clean. The V5 development seed is under `src/main/resources/db/dev/` and runs only when the `dev` profile is active, which puts both locations on the Flyway path, so the two must not share a version number.
 - Integration tests use Flyway against PostgreSQL and `ddl-auto: validate`; unit tests use H2 with Flyway disabled and `create-drop`.
 - Detailed component boundaries, rule semantics, transaction/outbox behavior, and operational trade-offs are in [docs/architecture.md](docs/architecture.md). The decisions are in [docs/adr](docs/adr/), and the measured performance is in [docs/performance.md](docs/performance.md).
-- The maintained API contract is [docs/openapi.yaml](docs/openapi.yaml); an importable Postman collection is in [docs/postman](docs/postman/).
+- The API contract is [docs/openapi.yaml](docs/openapi.yaml), generated from the running service with `make api-docs` (springdoc exposes it at `/v3/api-docs.yaml`). The curated Postman collection lives in [docs/postman](docs/postman/); `make api-contract` (also a CI step) fails when an endpoint is missing from either artifact.
 
 ## Timestamps
 
-A transaction timestamp may be up to `fraud.engine.evaluation.max-future-skew` (5 minutes by default) ahead of the service clock, which absorbs the clock skew of the systems that produce the events. A timestamp further in the future is rejected with a `400`.
+A transaction timestamp may be up to `fraud.engine.evaluation.max-future-skew` (5 minutes by default) ahead of the service clock and up to `fraud.engine.evaluation.max-past-skew` (7 days by default) in the past. These bounds absorb producer clock skew and reject nonsense event times with a `400`; within them, backdated events are evaluated against the history as of their own event time.
 
-Backdated transactions are accepted. They are evaluated against the history as of their own event time, and they are visible to later events of the same account. Every rule window is relative to the incoming event time, never to the wall clock.
+Backdated transactions within that bound are accepted. They are evaluated against the history as of their own event time, and they are visible to later events of the same account. Every rule window is relative to the incoming event time, never to the wall clock.
 
 ## Design decisions
 

@@ -340,7 +340,7 @@ components:
         currency:
           type: string
           pattern: '^[A-Z]{3}$'
-          description: Only currencies with configured thresholds are accepted (ZAR by default).
+          description: Only currencies with configured thresholds are accepted (ZAR, USD).
           example: ZAR
         category:
           type: string
@@ -356,7 +356,7 @@ components:
         timestamp:
           type: string
           format: date-time
-          description: Transaction event time; future timestamps are invalid.
+          description: Transaction event time. It may be at most 5 minutes in the future and 7 days in the past; further out is rejected.
     EvaluationSummary:
       type: object
       required: [transactionId, accountId, totalRiskScore, overallSeverity, isFraudulent, alerts]

@@ -46,6 +46,7 @@ fraud:
     evaluation:
       history-window: PT24H
       max-future-skew: PT5M
+    max-past-skew: P7D
     lock:
       # H2 has no advisory lock support; the unit tests use the no-op implementation.
       enabled: false
@@ -55,6 +56,7 @@ fraud:
         enabled: true
         thresholds:
           ZAR: 50000.00
+          USD: 2500.00
         risk-score: 40
         severity: HIGH
       category-risk:

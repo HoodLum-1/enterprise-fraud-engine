@@ -120,6 +120,18 @@ class TransactionRequestDtoValidationTest {
     }
 
     @Test
+    void aTimestampBeyondThePastSkewAllowanceIsRejected() {
+        TransactionRequestDto dto = FraudTestDataFactory.transactionRequest()
+            .timestamp(Instant.now().minus(30, ChronoUnit.DAYS))
+            .build();
+
+        Set<ConstraintViolation<TransactionRequestDto>> violations = validator.validate(dto);
+
+        assertFalse(violations.isEmpty());
+        assertTrue(violations.stream().anyMatch(v -> v.getPropertyPath().toString().equals("timestamp")));
+    }
+
+    @Test
     void testResponseDtosInstantiation() {
         UUID alertId = UUID.randomUUID();
         UUID txId = UUID.randomUUID();

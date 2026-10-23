@@ -44,6 +44,23 @@ class CategoryBasedRiskRuleTest {
     }
 
     @Test
+    void appliesPerCategoryOverrides() {
+        var props = new com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties();
+        var override = new com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties.CategoryRiskOverride();
+        override.setRiskScore(77);
+        override.setSeverity(Severity.CRITICAL);
+        props.getRules().getCategoryRisk().setOverrides(java.util.Map.of("CRYPTO", override));
+        var ruleWithProps = new CategoryBasedRiskRule(props);
+
+        var result = ruleWithProps.evaluate(
+            FraudTestDataFactory.transaction().category("crypto").build(), List.of());
+
+        assertTrue(result.isTriggered());
+        assertEquals(77, result.riskScore());
+        assertEquals(Severity.CRITICAL, result.severity());
+    }
+
+    @Test
     void toleratesANullEntryInTheConfiguredCategories() {
         var props = new com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties();
         props.getRules().getCategoryRisk().setCategories(

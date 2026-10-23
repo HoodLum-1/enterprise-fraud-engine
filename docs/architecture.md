@@ -38,14 +38,14 @@ Rules are independent `FraudRule` components, ordered by Spring `@Order`. Each t
 
 | Rule | Inputs and window | Default condition | Default score / severity |
 |---|---|---|---|
-| `HighAmountRule` | Current amount and currency | Amount exceeds the explicitly configured threshold; default is ZAR 50,000. Unsupported currencies are rejected. | 40 / HIGH |
+| `HighAmountRule` | Current amount and currency | Amount exceeds the explicitly configured threshold; defaults are ZAR 50,000 and USD 2,500. Unsupported currencies are rejected. | 40 / HIGH |
 | `TransactionVelocityRule` | Current transaction plus prior account events in the 2-minute window | More than 3 total transactions; 3 is allowed and the 4th triggers. | 50 / CRITICAL |
 | `LocationMismatchRule` | Current location and prior account history at event time | Latest prior transaction differs in location and is within the configured 10-minute gap. Current transaction is never its own comparison event. | 60 / CRITICAL |
-| `CategoryBasedRiskRule` | Normalized transaction category | Category is `GAMBLING` or `CRYPTO`. | 30 / MEDIUM |
+| `CategoryBasedRiskRule` | Normalized transaction category | Category is `GAMBLING` or `CRYPTO`; `overrides` can change the score and severity per category. | 30 / MEDIUM |
 
 All windows and thresholds are configurable. Amount comparisons are performed only against a configured threshold for the transaction currency; there is no implicit currency conversion.
 
-Every window is relative to the incoming event time, never to the wall clock. A transaction timestamp may be up to `fraud.engine.evaluation.max-future-skew` (5 minutes by default) ahead of the service clock, and is rejected with a `400` beyond that. Backdated transactions are accepted and are evaluated against the history as of their own event time.
+Every window is relative to the incoming event time, never to the wall clock. A transaction timestamp may be up to `fraud.engine.evaluation.max-future-skew` (5 minutes by default) ahead of the service clock and up to `fraud.engine.evaluation.max-past-skew` (7 days by default) in the past; outside those bounds it is rejected with a `400`. Within them, backdated transactions are evaluated against the history as of their own event time.
 
 ## Persistence, event delivery, and case workflow
 
