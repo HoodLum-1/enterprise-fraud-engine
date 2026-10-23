@@ -116,9 +116,10 @@ class KeycloakSecurityIntegrationTest {
     }
 
     @Test
-    void aTokenForTheWrongAudienceIsRejected() {
+    void aTokenWithoutTheRequiredRoleIsForbidden() {
         // The viewer user exists in the realm but has no analyst role, so the case list, which
-        // requires FRAUD_ANALYST, has to be refused.
+        // requires FRAUD_ANALYST, has to be refused. This is an authorization check, not an
+        // audience check.
         String viewerToken = requestToken("fraud-viewer", "fraud-viewer-dev");
         assertNotNull(viewerToken, "the realm should issue a token for the viewer user");
 
