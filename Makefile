@@ -5,7 +5,7 @@ help:
 	@echo "  make up         Build and start the full Compose stack"
 	@echo "  make down       Stop Compose services (keeps database volume)"
 	@echo "  make build      Build the application JAR without tests"
-	@echo "  make test       Run unit and Testcontainers integration tests"
+	@echo "  make test       Run unit tests only"
 	@echo "  make smoke      Run smoke tests against a dev-profile instance"
 	@echo "  make smoke-auth Run authenticated smoke tests (Keycloak analyst credentials)"
 	@echo "  make logs       Tail Compose service logs"
@@ -22,6 +22,9 @@ build:
 
 test:
 	./mvnw test
+
+verify:
+	./mvnw verify
 
 smoke:
 	./smoke-test.sh
