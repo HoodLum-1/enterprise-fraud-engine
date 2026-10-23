@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -131,5 +132,41 @@ class LocationMismatchRuleTest {
 
         assertFalse(result.isTriggered());
         assertEquals(0, result.riskScore());
+    }
+
+
+    @Test
+    void returnsCleanForNullsAndEmptyHistory() {
+        assertFalse(rule.evaluate(null, List.of(FraudTestDataFactory.transaction().build())).isTriggered());
+        Transaction currentTx = FraudTestDataFactory.transaction().timestamp(Instant.now()).location("JHB").build();
+        assertFalse(rule.evaluate(currentTx, null).isTriggered());
+        assertFalse(rule.evaluate(currentTx, List.of()).isTriggered());
+    }
+
+    @Test
+    void ignoresNullHistoryEntriesAndEntriesWithoutALocation() {
+        Instant now = Instant.now();
+        Transaction currentTx = FraudTestDataFactory.transaction().location("Durban").timestamp(now).build();
+        List<Transaction> history = new ArrayList<>();
+        history.add(null);
+        history.add(FraudTestDataFactory.transaction().location(null).timestamp(now.minus(5, ChronoUnit.MINUTES)).build());
+        RuleEvaluationResult result = rule.evaluate(currentTx, history);
+        assertFalse(result.isTriggered());
+    }
+
+    @Test
+    void doesNotTriggerWhenCurrentLocationMissing() {
+        Instant now = Instant.now();
+        Transaction currentTx = FraudTestDataFactory.transaction().location(null).timestamp(now).build();
+        Transaction past = FraudTestDataFactory.transaction().location("Cape Town").timestamp(now.minus(5, ChronoUnit.MINUTES)).build();
+        assertFalse(rule.evaluate(currentTx, List.of(past)).isTriggered());
+    }
+
+    @Test
+    void doesNotTriggerWhenLocationsAreTheSameIgnoringCase() {
+        Instant now = Instant.now();
+        Transaction currentTx = FraudTestDataFactory.transaction().location(" cape town ").timestamp(now).build();
+        Transaction past = FraudTestDataFactory.transaction().location("CAPE TOWN").timestamp(now.minus(5, ChronoUnit.MINUTES)).build();
+        assertFalse(rule.evaluate(currentTx, List.of(past)).isTriggered());
     }
 }

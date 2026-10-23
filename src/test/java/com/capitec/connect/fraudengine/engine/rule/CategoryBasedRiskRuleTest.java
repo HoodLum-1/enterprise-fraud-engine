@@ -28,4 +28,29 @@ class CategoryBasedRiskRuleTest {
         assertFalse(result.isTriggered());
         assertEquals(0, result.riskScore());
     }
+
+
+    @Test
+    void doesNotTriggerForANullTransaction() {
+        assertFalse(rule.evaluate(null, List.of()).isTriggered());
+    }
+
+    @Test
+    void doesNotTriggerWithUnconfiguredCategorySet() {
+        var props = new com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties();
+        props.getRules().getCategoryRisk().setCategories(java.util.Set.of());
+        var ruleWithProps = new CategoryBasedRiskRule(props);
+        assertFalse(ruleWithProps.evaluate(FraudTestDataFactory.transaction().category("GAMBLING").build(), List.of()).isTriggered());
+    }
+
+    @Test
+    void toleratesANullEntryInTheConfiguredCategories() {
+        var props = new com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties();
+        props.getRules().getCategoryRisk().setCategories(
+            new java.util.HashSet<>(java.util.Arrays.asList(null, "CRYPTO")));
+        var ruleWithProps = new CategoryBasedRiskRule(props);
+
+        assertTrue(ruleWithProps.evaluate(
+            FraudTestDataFactory.transaction().category("CRYPTO").build(), List.of()).isTriggered());
+    }
 }

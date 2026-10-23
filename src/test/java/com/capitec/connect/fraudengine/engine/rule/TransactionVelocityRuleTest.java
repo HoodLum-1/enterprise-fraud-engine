@@ -151,4 +151,39 @@ class TransactionVelocityRuleTest {
 
         assertFalse(result.isTriggered());
     }
+
+
+    @Test
+    void returnsCleanWhenCurrentTransactionIsNull() {
+        assertFalse(rule.evaluate(null, List.of(FraudTestDataFactory.transaction().build())).isTriggered());
+    }
+
+    @Test
+    void returnsCleanWhenHistoryIsNullOrEmpty() {
+        Transaction currentTx = FraudTestDataFactory.transaction().accountId("ACC-1").timestamp(Instant.now()).build();
+        assertFalse(rule.evaluate(currentTx, null).isTriggered());
+        assertFalse(rule.evaluate(currentTx, List.of()).isTriggered());
+    }
+
+    @Test
+    void ignoresNullHistoryEntries() {
+        Instant now = Instant.now();
+        Transaction currentTx = FraudTestDataFactory.transaction().timestamp(now).build();
+        List<Transaction> history = new ArrayList<>();
+        history.add(null);
+        history.add(FraudTestDataFactory.transaction().timestamp(now.minus(30, ChronoUnit.SECONDS)).build());
+        RuleEvaluationResult result = rule.evaluate(currentTx, history);
+        assertFalse(result.isTriggered());
+    }
+
+    @Test
+    void doesNotTriggerWhenExactlyAtThreshold() {
+        Instant now = Instant.now();
+        Transaction currentTx = FraudTestDataFactory.transaction().timestamp(now).build();
+        List<Transaction> history = new ArrayList<>();
+        history.add(FraudTestDataFactory.transaction().timestamp(now.minus(10, ChronoUnit.SECONDS)).build());
+        history.add(FraudTestDataFactory.transaction().timestamp(now.minus(20, ChronoUnit.SECONDS)).build());
+        RuleEvaluationResult result = rule.evaluate(currentTx, history);
+        assertFalse(result.isTriggered());
+    }
 }
