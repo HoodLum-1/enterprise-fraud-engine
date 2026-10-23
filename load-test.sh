@@ -95,6 +95,35 @@ print(past.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z")'
 }
 
 main() {
+# Auto-fetch JWT token if not explicitly provided but credentials exist
+    if [[ -z "${AUTH_TOKEN:-}" ]]; then
+        if [[ -n "${KEYCLOAK_USERNAME:-}" && -n "${KEYCLOAK_PASSWORD:-}" ]]; then
+            log_info "Fetching JWT token from Keycloak for ${KEYCLOAK_USERNAME}..."
+            KC_URL="${KEYCLOAK_URL:-http://localhost:8180}"
+            TOKEN_RESPONSE=$(python3 -c "
+import urllib.request, urllib.parse, json
+data = urllib.parse.urlencode({
+    'client_id': 'fraud-engine-client',
+    'username': '${KEYCLOAK_USERNAME}',
+    'password': '${KEYCLOAK_PASSWORD}',
+    'grant_type': 'password'
+}).encode()
+req = urllib.request.Request('${KC_URL}/realms/fraud-engine/protocol/openid-connect/token', data=data)
+try:
+    with urllib.request.urlopen(req) as response:
+        print(json.loads(response.read().decode()).get('access_token', ''))
+except Exception as e:
+    print('')
+              ")
+            AUTH_TOKEN="$(echo "$TOKEN_RESPONSE" | tr -d '[:space:]')"
+            if [[ -n "$AUTH_TOKEN" ]]; then
+                log_success "Successfully obtained JWT bearer token"
+                AUTH_ARGS=(-H "Authorization: Bearer ${AUTH_TOKEN}")
+            else
+                log_warn "Could not auto-fetch token from Keycloak (is Keycloak running on port 8180?)"
+            fi
+        fi
+    fi
     if ! command -v curl >/dev/null; then log_error "curl not found"; exit 1; fi
     if ! command -v bc >/dev/null; then log_error "bc not found"; exit 1; fi
     if ! command -v python3 >/dev/null; then
