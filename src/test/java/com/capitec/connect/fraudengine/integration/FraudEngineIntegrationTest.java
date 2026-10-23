@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -86,12 +87,23 @@ class FraudEngineIntegrationTest {
     @Autowired
     private KafkaTemplate<String, Object> kafkaTemplate;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     private MockMvc mockMvc;
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.webAppContextSetup(webApplicationContext).build();
+    }
+
+    @Test
+    void productionMigrationsDoNotLeaveDemoDataBehind() {
+        assertEquals(0, countDemoRows("transactions"),
+            "the production migration path must not leave ACC-DEMO transactions behind");
+        assertEquals(0, countDemoRows("fraud_alerts"),
+            "the production migration path must not leave ACC-DEMO alerts behind");
     }
 
     @Test
@@ -282,6 +294,12 @@ class FraudEngineIntegrationTest {
         await(() -> freezeAuditRepository.existsByTransactionId(transactionId));
         await(() -> outboxRepository.countByEventType("ACCOUNT_FREEZE") > 0);
         assertTrue(transactionRepository.existsById(transactionId));
+    }
+
+    private long countDemoRows(String table) {
+        Long count = jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM " + table + " WHERE account_id LIKE 'ACC-DEMO-%'", Long.class);
+        return count == null ? 0 : count;
     }
 
     private void await(java.util.function.BooleanSupplier condition) throws InterruptedException {
