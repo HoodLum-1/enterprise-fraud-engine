@@ -24,6 +24,9 @@ jobs:
       - name: Verify tests and rule coverage
         run: ./mvnw --batch-mode verify
 
+      - name: Check API contract artifacts
+        run: python3 scripts/check_api_contract.py
+
       - name: Validate Compose configuration
         run: docker compose config --quiet
 

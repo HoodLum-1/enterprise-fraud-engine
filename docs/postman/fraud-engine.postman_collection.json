@@ -276,7 +276,46 @@
 			"response": []
 		},
 		{
-			"name": "5. Get Fraud Alerts for Account",
+			"name": "5. Get Transaction by ID",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.test('Status code is 200 OK', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"const jsonData = pm.response.json();",
+							"pm.test('Returns the evaluated transaction', function () {",
+							"    pm.expect(jsonData.transactionId).to.eql(pm.collectionVariables.get('lastTransactionId'));",
+							"    pm.expect(jsonData).to.have.property('totalRiskScore');",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/transactions/{{lastTransactionId}}",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"transactions",
+						"{{lastTransactionId}}"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "6. Get Fraud Alerts for Account",
 			"event": [
 				{
 					"listen": "test",
@@ -332,7 +371,7 @@
 			"response": []
 		},
 		{
-			"name": "6. List Fraud Cases",
+			"name": "7. List Fraud Cases",
 			"request": {
 				"method": "GET",
 				"header": [],
@@ -374,7 +413,7 @@
 			"response": []
 		},
 		{
-			"name": "7. Get Fraud Case by Transaction",
+			"name": "8. Get Fraud Case by Transaction",
 			"request": {
 				"method": "GET",
 				"header": [],
@@ -417,7 +456,7 @@
 			"response": []
 		},
 		{
-			"name": "8. Update Fraud Case Status",
+			"name": "9. Update Fraud Case Status",
 			"request": {
 				"method": "PATCH",
 				"header": [],
@@ -462,7 +501,7 @@
 			"response": []
 		},
 		{
-			"name": "9. Actuator Health Endpoint",
+			"name": "10. Actuator Health Endpoint",
 			"event": [
 				{
 					"listen": "test",
@@ -498,7 +537,7 @@
 			"response": []
 		},
 		{
-			"name": "10. Actuator Prometheus Metrics Endpoint",
+			"name": "11. Actuator Prometheus Metrics Endpoint",
 			"event": [
 				{
 					"listen": "test",
