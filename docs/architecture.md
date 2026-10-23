@@ -28,7 +28,7 @@ This is a layered application with domain-focused packages and ports/adapters at
 
 ### Per-account concurrency
 
-Concurrent evaluations of the same account are serialised by a PostgreSQL transaction-scoped advisory lock, taken before the duplicate check and before the history read. Without it, two concurrent evaluations would each read a history that excludes the other's uncommitted write, and the velocity and location-mismatch rules could both be missed.
+Concurrent evaluations of the same account are serialised by a PostgreSQL transaction-scoped advisory lock, taken before the duplicate check and before the history read. Without it, two concurrent evaluations would each read a history that excludes the other's uncommitted write, and the velocity and location-mismatch rules could both be missed. `AccountLockIntegrationTest` covers the lock lifecycle and a simultaneous pair of evaluations for one account that must produce exactly one velocity alert.
 
 The lock is acquired with a `lock_timeout` (default `PT2S`, `fraud.engine.lock.timeout`). A contended account fails fast with `AccountLockTimeoutException`, which is reported as `503` with `Retry-After: 1` rather than parking a request on one of the 20 Hikari connections. The timeout is not a `DataAccessException` and is listed in the circuit breaker's `ignoreExceptions`, so contention on one account cannot open the circuit for every other caller.
 

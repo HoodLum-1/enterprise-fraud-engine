@@ -1,8 +1,12 @@
 package com.capitec.connect.fraudengine.integration;
 
+import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException;
+import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.engine.service.AccountLock;
+import com.capitec.connect.fraudengine.engine.service.FraudEvaluationService;
 import com.capitec.connect.fraudengine.infrastructure.lock.AccountLockKeys;
+import com.capitec.connect.fraudengine.integration.util.IntegrationTestDataFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,7 +25,15 @@ import org.testcontainers.utility.DockerImageName;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -50,6 +62,9 @@ class AccountLockIntegrationTest {
 
     @Autowired
     private AccountLock accountLock;
+
+    @Autowired
+    private FraudEvaluationService fraudEvaluationService;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -102,6 +117,56 @@ class AccountLockIntegrationTest {
             accountLock.lockForEvaluation(first);
             accountLock.lockForEvaluation(second);
         });
+    }
+
+    @Test
+    void simultaneousEvaluationsOfOneAccountTriggerVelocityExactlyOnce() throws Exception {
+        String accountId = "ACC-LOCK-" + UUID.randomUUID();
+        Instant baseTime = Instant.now().minusSeconds(60);
+
+        // Two prior transactions put the account one transaction below the velocity threshold.
+        fraudEvaluationService.evaluate(
+            IntegrationTestDataFactory.velocityTransaction(accountId, baseTime, 0).build());
+        fraudEvaluationService.evaluate(
+            IntegrationTestDataFactory.velocityTransaction(accountId, baseTime, 10).build());
+
+        // The pair shares an event timestamp, so the second evaluation sees the first one regardless
+        // of which thread wins the advisory lock. Without the lock both could read the same two-row
+        // history and neither would trigger, which is the regression this test guards against.
+        TransactionRequestDto first = IntegrationTestDataFactory
+            .velocityTransaction(accountId, baseTime, 20).build();
+        TransactionRequestDto second = IntegrationTestDataFactory
+            .velocityTransaction(accountId, baseTime, 20).build();
+
+        CyclicBarrier startTogether = new CyclicBarrier(3);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Callable<EvaluationSummary> evaluateFirst = () -> {
+                startTogether.await(5, TimeUnit.SECONDS);
+                return fraudEvaluationService.evaluate(first);
+            };
+            Callable<EvaluationSummary> evaluateSecond = () -> {
+                startTogether.await(5, TimeUnit.SECONDS);
+                return fraudEvaluationService.evaluate(second);
+            };
+            Future<EvaluationSummary> firstResult = executor.submit(evaluateFirst);
+            Future<EvaluationSummary> secondResult = executor.submit(evaluateSecond);
+
+            startTogether.await(5, TimeUnit.SECONDS);
+            EvaluationSummary firstSummary = firstResult.get(30, TimeUnit.SECONDS);
+            EvaluationSummary secondSummary = secondResult.get(30, TimeUnit.SECONDS);
+
+            long velocityAlerts = Stream.of(firstSummary, secondSummary)
+                .flatMap(summary -> summary.alerts().stream())
+                .filter(alert -> "TransactionVelocityRule".equals(alert.ruleName()))
+                .count();
+
+            assertEquals(1, velocityAlerts,
+                "the account lock should make exactly one of the concurrent evaluations see the "
+                    + "other transaction and cross the velocity threshold");
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test
