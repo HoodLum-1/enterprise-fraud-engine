@@ -221,7 +221,7 @@
 					<includes>
 						<include>**/*IntegrationTest.java</include>
 					</includes>
-					<argLine>@{argLine} -XX:+EnableDynamicAgentLoading</argLine>
+					<argLine>@{failsafeArgLine} -XX:+EnableDynamicAgentLoading</argLine>
 				</configuration>
 				<executions>
 					<execution>
@@ -247,12 +247,19 @@
 						</goals>
 					</execution>
 					<execution>
-						<!-- Failsafe runs the integration tests, which need their own agent. -->
+						<!--
+						    Failsafe runs the integration tests, which need their own agent. Use a
+						    separate property so the two goal executions do not both overwrite
+						    argLine and start two agents in the same JVM.
+						-->
 						<id>prepare-agent-integration</id>
 						<phase>pre-integration-test</phase>
 						<goals>
 							<goal>prepare-agent-integration</goal>
 						</goals>
+						<configuration>
+							<propertyName>failsafeArgLine</propertyName>
+						</configuration>
 					</execution>
 					<execution>
 						<!-- The coverage gate covers the unit and the integration tests together. -->
@@ -297,15 +304,45 @@
 									<limits>
 										<!--
 										    The rules are the part of the service where a regression is
-										    silent, so they are gated. The measured coverage of the package
-										    is 0.90 including the integration tests; the gate sits below
-										    that so an ordinary change does not break the build, but a real
-										    regression does.
+										    silent, so they are gated on both lines and branches. The
+										    measured coverage of the package is about 0.90 lines and 0.66
+										    branches including the integration tests; the gate sits below
+										    that with margin while still catching a real regression.
 										-->
 										<limit>
 											<counter>LINE</counter>
 											<value>COVEREDRATIO</value>
 											<minimum>0.85</minimum>
+										</limit>
+										<limit>
+											<counter>BRANCH</counter>
+											<value>COVEREDRATIO</value>
+											<minimum>0.65</minimum>
+										</limit>
+									</limits>
+								</rule>
+								<rule>
+									<element>PACKAGE</element>
+									<includes>
+										<include>com.capitec.connect.fraudengine.engine.service</include>
+									</includes>
+									<limits>
+										<!--
+										    The evaluation service and its supporting services are the
+										    orchestration points for the rules and the transaction boundary,
+										    so they are gated too. The measured coverage is about 0.95 lines
+										    and 0.81 branches including the integration tests; the gate
+										    leaves a margin below that.
+										-->
+										<limit>
+											<counter>LINE</counter>
+											<value>COVEREDRATIO</value>
+											<minimum>0.90</minimum>
+										</limit>
+										<limit>
+											<counter>BRANCH</counter>
+											<value>COVEREDRATIO</value>
+											<minimum>0.75</minimum>
 										</limit>
 									</limits>
 								</rule>
