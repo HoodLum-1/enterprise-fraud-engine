@@ -89,6 +89,7 @@ fraud:
       outbox-poll-delay-ms: 1000
       outbox-publisher-enabled: true
       batch-size: 20
+      max-batches-per-poll: 100
       send-timeout-ms: 5000
       lease-margin-ms: 30000
       max-attempts: 10

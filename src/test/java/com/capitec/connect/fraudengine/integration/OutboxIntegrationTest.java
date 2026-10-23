@@ -79,6 +79,22 @@ class OutboxIntegrationTest {
     }
 
     @Test
+    void onePollDrainsMoreThanOneFullBatch() {
+        String eventKey = "ACC-OUTBOX-DRAIN-TEST";
+        int total = properties.getMessaging().getBatchSize() * 2 + 5;
+        for (int index = 0; index < total; index++) {
+            insertPending(UUID.randomUUID(), eventKey, "TRANSACTION_EVALUATED", evaluationPayload(), 0);
+        }
+
+        publisher.publishPendingEvents();
+
+        Long published = jdbcTemplate.queryForObject(
+            "SELECT count(*) FROM event_outbox WHERE event_key = ? AND status = 'PUBLISHED'",
+            Long.class, eventKey);
+        assertEquals(total, published, "one poll should keep claiming while batches come back full");
+    }
+
+    @Test
     void anEventThatExhaustsItsRetriesIsParkedAsFailed() {
         UUID id = UUID.randomUUID();
         insertPending(id, "NOT_A_SUPPORTED_EVENT", "{}", properties.getMessaging().getMaxAttempts());

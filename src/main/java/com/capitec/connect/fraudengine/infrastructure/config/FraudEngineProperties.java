@@ -55,6 +55,13 @@ public class FraudEngineProperties {
         /** How many rows a publisher claims per poll. */
         private int batchSize = 20;
 
+        /**
+         * How many full batches one poll may drain before it yields to the scheduler. This keeps a
+         * very large backlog from monopolising the scheduler thread while still letting a normal
+         * burst drain in one poll.
+         */
+        private int maxBatchesPerPoll = 100;
+
         /** How long a single Kafka send may take before it is treated as failed. */
         private long sendTimeoutMs = 5000L;
 

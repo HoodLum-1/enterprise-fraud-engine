@@ -52,20 +52,22 @@ Redis cache was removed (see [ADR 0003](adr/0003-no-redis-cache.md)).
 |---|---|---|---|---|---|---|---|
 | Small table (1,016 transactions, 52 accounts) | 500 | 2.46 s | 204 req/s | 15.2 ms | 34.1 ms | 63.9 ms | 100% |
 | Large table (201,016 transactions, 20,000 accounts) | 1,000 | 5.49 s | 182 req/s | 14.6 ms | 60.3 ms | 122.3 ms | 100% |
+| Outbox drain verification (fresh dev database, warm JVM) | 1,000 | 5.85 s | 170.8 req/s | 14.9 ms | 33.6 ms | 57.4 ms | 100% |
 
 Every request was answered with `201`; there were no `429`, `503` or `409` responses.
 
 The in-service evaluation time, taken from the `fraud_evaluation_duration_seconds` histogram that
-the service publishes, is slightly lower than the client-side latency, as expected:
+the service publishes, is slightly lower than the client-side latency, as expected. The values
+below are from the outbox drain verification run:
 
-| Percentile | Client side | In service (histogram) |
+| Percentile | Client side (warm run) | In service (histogram) |
 |---|---|---|
-| p50 | 14.6 ms | 10.7 ms |
-| p95 | 60.3 ms | 56.7 ms |
-| p99 | 122.3 ms | 124.0 ms |
+| p50 | 14.9 ms | 11.3 ms |
+| p95 | 33.6 ms | 47.1 ms |
+| p99 | 57.4 ms | 93.2 ms |
 
-The p95 is therefore in the order of 60 ms on this hardware, with a throughput of roughly
-180 requests per second on a single instance against a co-located database.
+The p95 is therefore in the order of 30-50 ms on this hardware, with a throughput of roughly
+170 requests per second on a single instance against a co-located database.
 
 ## What the numbers show
 
@@ -74,12 +76,14 @@ The p95 is therefore in the order of 60 ms on this hardware, with a throughput o
 - **The write path dominates.** The evaluation writes the transaction, its alerts and the outbox
   row in one transaction, plus the advisory lock. The evaluation time is dominated by those writes
   and by the per-transaction commit, not by the history read.
-- **The outbox publisher is the throughput ceiling.** The publisher claims at most
-  `fraud.engine.messaging.batch-size` rows (20 by default) per poll, and polls every
-  `outbox-poll-delay-ms` (1 second by default), so it drains at most about 20 rows per second. In
-  the large run, 1,000 evaluations produced 1,000 outbox rows, and the backlog was still visible in
-  the `fraud_outbox_pending` gauge afterwards. Raising the batch size or the poll rate, or running
-  several publisher instances, is the lever if the outbox has to keep up with the ingestion rate.
+- **The outbox publisher is no longer the ceiling.** A poll starts every Kafka send in the claimed
+  batch before it awaits any of them, and keeps claiming while batches come back full. In the
+  verification run, 1,000 evaluations produced 1,000 outbox rows; the first (cold) run left 146
+  rows pending immediately after the load test and drained to zero within 2 seconds, and the warm
+  run left 22 rows and drained in under 1 second. With 20 sends in flight per batch and up to
+  `fraud.engine.messaging.max-batches-per-poll` batches per poll, the publisher can drain a burst
+  faster than the ~170 req/s ingestion rate observed here. If sustained ingestion still outruns it,
+  raise the batch size, the poll frequency, or the number of publisher instances.
 - **The rate limiter is not the limiting factor here.** The default limit is 1,000 requests per
   second per process, well above the measured throughput.
 - **The lock did not become a bottleneck.** All 2,000 lock acquisitions in the run succeeded with

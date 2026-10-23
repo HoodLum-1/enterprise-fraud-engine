@@ -8,12 +8,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.support.SendResult;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -23,6 +28,11 @@ import java.util.concurrent.TimeUnit;
  * for a Kafka send: a short transaction claims a batch and leases it, the sends happen outside any
  * transaction, and a short transaction records the outcome. A publisher that dies mid-publish
  * leaves the row leased, and another publisher reclaims it once the lease expires.
+ *
+ * <p>The sends in a claimed batch are started before any of them is awaited, so a batch takes about
+ * one send timeout rather than one timeout per row. A poll keeps claiming full batches until the
+ * backlog is drained or the configured batch limit is reached, which lets the publisher keep up with
+ * a burst instead of draining only one batch per second.
  *
  * <p>Delivery is at-least-once and unordered. Rows are keyed by account, so a topic's partitions
  * keep a per-account order in the common case, but a redelivery or a second publisher may
@@ -43,12 +53,19 @@ public class EvaluationOutboxPublisher {
     @Scheduled(fixedDelayString = "${fraud.engine.messaging.outbox-poll-delay-ms:1000}")
     public void publishPendingEvents() {
         FraudEngineProperties.Messaging messaging = properties.getMessaging();
-        List<EvaluationOutboxEntity> claimed =
-            outboxStore.claim(messaging.getBatchSize(), leaseDuration(messaging));
+        int batches = 0;
+        int claimedCount;
 
-        for (EvaluationOutboxEntity row : claimed) {
-            publish(row);
-        }
+        do {
+            List<EvaluationOutboxEntity> claimed =
+                outboxStore.claim(messaging.getBatchSize(), leaseDuration(messaging));
+            claimedCount = claimed.size();
+            if (!claimed.isEmpty()) {
+                publishBatch(claimed, messaging);
+            }
+            batches++;
+        } while (claimedCount == messaging.getBatchSize()
+            && batches < messaging.getMaxBatchesPerPoll());
     }
 
     /**
@@ -65,19 +82,44 @@ public class EvaluationOutboxPublisher {
         }
     }
 
-    private void publish(EvaluationOutboxEntity row) {
-        try {
-            OutboundEvent event = toOutboundEvent(row);
-            kafkaTemplate.send(event.topic(), row.getEventKey(), event.payload())
-                .get(properties.getMessaging().getSendTimeoutMs(), TimeUnit.MILLISECONDS);
-            outboxStore.acknowledge(row.getId());
-            fraudMetrics.recordOutboxPublish("published");
-        } catch (Exception ex) {
-            handleFailure(row, ex);
+    /**
+     * Starts every send in the batch first, then waits for the outcomes. Starting the sends up
+     * front is what turns the old sequential per-row wait into one concurrent round trip.
+     */
+    private void publishBatch(List<EvaluationOutboxEntity> rows,
+                              FraudEngineProperties.Messaging messaging) {
+        List<PendingPublish> pending = new ArrayList<>(rows.size());
+        for (EvaluationOutboxEntity row : rows) {
+            pending.add(new PendingPublish(row, send(row, messaging)));
+        }
+        for (PendingPublish publish : pending) {
+            await(publish, messaging);
         }
     }
 
-    private void handleFailure(EvaluationOutboxEntity row, Exception ex) {
+    private CompletableFuture<SendResult<String, Object>> send(EvaluationOutboxEntity row,
+                                                               FraudEngineProperties.Messaging messaging) {
+        try {
+            OutboundEvent event = toOutboundEvent(row);
+            return kafkaTemplate.send(event.topic(), row.getEventKey(), event.payload())
+                .orTimeout(messaging.getSendTimeoutMs(), TimeUnit.MILLISECONDS);
+        } catch (Exception ex) {
+            return CompletableFuture.failedFuture(ex);
+        }
+    }
+
+    private void await(PendingPublish publish, FraudEngineProperties.Messaging messaging) {
+        EvaluationOutboxEntity row = publish.row();
+        try {
+            publish.send().get(messaging.getSendTimeoutMs(), TimeUnit.MILLISECONDS);
+            outboxStore.acknowledge(row.getId());
+            fraudMetrics.recordOutboxPublish("published");
+        } catch (Exception ex) {
+            handleFailure(row, rootCause(ex));
+        }
+    }
+
+    private void handleFailure(EvaluationOutboxEntity row, Throwable ex) {
         FraudEngineProperties.Messaging messaging = properties.getMessaging();
         int attempts = row.getAttempts();
 
@@ -108,6 +150,15 @@ public class EvaluationOutboxPublisher {
         return Duration.ofSeconds(Math.min(300L, 1L << Math.min(attempts, 8)));
     }
 
+    private Throwable rootCause(Throwable ex) {
+        Throwable current = ex;
+        while ((current instanceof ExecutionException || current instanceof CompletionException)
+            && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
     private OutboundEvent toOutboundEvent(EvaluationOutboxEntity row) throws Exception {
         FraudEngineProperties.Messaging messaging = properties.getMessaging();
         return switch (row.getEventType()) {
@@ -117,6 +168,10 @@ public class EvaluationOutboxPublisher {
                 objectMapper.readValue(row.getPayload(), AccountActionEvent.class));
             default -> throw new IllegalArgumentException("Unsupported outbox event type: " + row.getEventType());
         };
+    }
+
+    private record PendingPublish(EvaluationOutboxEntity row,
+                                  CompletableFuture<SendResult<String, Object>> send) {
     }
 
     private record OutboundEvent(String topic, Object payload) {

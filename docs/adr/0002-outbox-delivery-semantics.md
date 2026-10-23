@@ -66,3 +66,10 @@ Ship **unordered at-least-once delivery**, and make the failure modes explicit.
   deduplicate.
 - **Keep publishing inside the claim transaction.** Rejected: it holds a connection and a set of
   row locks for the duration of the slowest send in the batch.
+
+## Implementation update
+
+Sends within a claimed batch are started concurrently before any send is awaited, and a poll
+continues claiming while batches come back full (up to `max-batches-per-poll`). This removes the
+old one-send-at-a-time throughput ceiling without changing the at-least-once, unordered delivery
+contract.
