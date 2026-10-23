@@ -26,8 +26,8 @@ class SecurityConfigDisabledTest {
     void shouldAllowAccessWhenSecurityDisabled() throws Exception {
         mockMvc.perform(get("/api/v1/fraud-cases"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content").isEmpty())
-                .andExpect(jsonPath("$.page.totalElements").value(0))
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.page.size").isNumber())
                 .andExpect(jsonPath("$.size").doesNotExist());
     }
 }

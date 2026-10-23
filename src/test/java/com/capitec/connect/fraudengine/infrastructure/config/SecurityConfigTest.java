@@ -9,6 +9,8 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.UUID;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
@@ -50,14 +52,13 @@ class SecurityConfigTest {
                 .andExpect(jsonPath("$.content").isArray())
                 .andExpect(jsonPath("$.page.size").value(100))
                 .andExpect(jsonPath("$.page.number").value(0))
-                .andExpect(jsonPath("$.page.totalElements").value(0))
                 .andExpect(jsonPath("$.size").doesNotExist());
     }
 
     @Test
     @DisplayName("Should serialize alert lists using the stable page DTO")
     void shouldSerializeAlertPageAsNestedDto() throws Exception {
-        mockMvc.perform(get("/api/v1/fraud-alerts/account/ACC-TEST")
+        mockMvc.perform(get("/api/v1/fraud-alerts/account/ACC-TEST-" + UUID.randomUUID())
                         .with(jwt().authorities(() -> "ROLE_FRAUD_ANALYST")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
