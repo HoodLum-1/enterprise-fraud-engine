@@ -8,7 +8,7 @@ import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.domain.model.FraudAlert;
 import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
 import com.capitec.connect.fraudengine.domain.model.Severity;
-import com.capitec.connect.fraudengine.engine.service.FraudEvaluationService;
+import com.capitec.connect.fraudengine.engine.service.HttpEvaluationService;
 import com.capitec.connect.fraudengine.engine.service.TransactionQueryService;
 import com.capitec.connect.fraudengine.infrastructure.security.AccountAccessPolicy;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
@@ -41,7 +41,7 @@ class TransactionControllerTest {
     private MockMvc mockMvc;
 
     @Mock
-    private FraudEvaluationService fraudEvaluationService;
+    private HttpEvaluationService httpEvaluationService;
 
     @Spy
     private FraudAlertMapper fraudAlertMapper = new FraudAlertMapper();
@@ -92,7 +92,7 @@ class TransactionControllerTest {
             List.of(alert)
         );
 
-        when(fraudEvaluationService.evaluate(any(TransactionRequestDto.class))).thenReturn(summary);
+        when(httpEvaluationService.evaluate(any(TransactionRequestDto.class))).thenReturn(summary);
 
         mockMvc.perform(post("/api/v1/transactions/evaluate")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -116,7 +116,7 @@ class TransactionControllerTest {
             .build();
         UUID txId = requestDto.id();
 
-        when(fraudEvaluationService.evaluate(any(TransactionRequestDto.class)))
+        when(httpEvaluationService.evaluate(any(TransactionRequestDto.class)))
             .thenThrow(new DuplicateTransactionException(txId));
 
         mockMvc.perform(post("/api/v1/transactions/evaluate")

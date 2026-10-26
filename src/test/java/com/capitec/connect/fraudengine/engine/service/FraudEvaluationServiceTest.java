@@ -19,9 +19,7 @@ import com.capitec.connect.fraudengine.infrastructure.metrics.FraudMetrics;
 import com.capitec.connect.fraudengine.infrastructure.messaging.FraudEventProducer;
 
 import com.capitec.connect.fraudengine.util.FraudTestDataFactory;
-import com.capitec.connect.fraudengine.api.exception.RateLimitExceededException;
 import com.capitec.connect.fraudengine.api.exception.EvaluationUnavailableException;
-import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import org.junit.jupiter.api.BeforeEach;
@@ -236,18 +234,6 @@ class FraudEvaluationServiceTest {
     @Test
     void historyWindowDefaultsTo24Hours() {
         assertEquals(Duration.ofHours(24), new FraudEngineProperties().getEvaluation().getHistoryWindow());
-    }
-
-    @Test
-    void rateLimitFallbackRejectsWithoutPersistingOrPublishing() {
-        RequestNotPermitted rejection = mock(RequestNotPermitted.class);
-
-        assertThrows(RateLimitExceededException.class,
-            () -> fraudEvaluationService.evaluateFallback(requestDto, rejection));
-
-        verify(transactionRepository, never()).save(any());
-        verify(fraudAlertRepository, never()).saveAll(any());
-        verifyNoInteractions(evaluationOutboxService);
     }
 
     @Test

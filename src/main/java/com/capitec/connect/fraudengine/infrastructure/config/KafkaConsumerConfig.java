@@ -1,6 +1,9 @@
 package com.capitec.connect.fraudengine.infrastructure.config;
 
+import com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException;
+import com.capitec.connect.fraudengine.infrastructure.messaging.MalformedTransactionEventException;
 import com.capitec.connect.fraudengine.infrastructure.messaging.TransactionEvaluatedEvent;
+import jakarta.validation.ConstraintViolationException;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.errors.SerializationException;
@@ -40,13 +43,13 @@ public class KafkaConsumerConfig {
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, TransactionEvaluatedEvent> kafkaListenerContainerFactory(
             @Qualifier("consumerFactory") ConsumerFactory<String, TransactionEvaluatedEvent> consumerFactory,
-            KafkaTemplate<String, Object> kafkaTemplate) {
+            DefaultErrorHandler transactionErrorHandler) {
 
         ConcurrentKafkaListenerContainerFactory<String, TransactionEvaluatedEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
 
-        configureListenerContainerFactory(factory, kafkaTemplate);
+        configureListenerContainerFactory(factory, transactionErrorHandler);
         return factory;
     }
 
@@ -61,18 +64,40 @@ public class KafkaConsumerConfig {
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, String> transactionIngestionListenerContainerFactory(
             @Qualifier("transactionIngestionConsumerFactory")ConsumerFactory<String, String> transactionIngestionConsumerFactory,
-            KafkaTemplate<String, Object> kafkaTemplate) {
+            DefaultErrorHandler transactionErrorHandler) {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
             new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(transactionIngestionConsumerFactory);
-        configureListenerContainerFactory(factory, kafkaTemplate);
+        configureListenerContainerFactory(factory, transactionErrorHandler);
         return factory;
     }
 
-    private void configureListenerContainerFactory(
-            ConcurrentKafkaListenerContainerFactory<?, ?> factory,
-            KafkaTemplate<String, Object> kafkaTemplate) {
-
+    /**
+     * The retry policy separates poison messages from transient failures.
+     *
+     * <p>Non-retryable exceptions describe a record that will fail identically on every
+     * redelivery, so it is published straight to the dead letter queue:
+     *
+     * <ul>
+     *   <li>{@link SerializationException} - the record bytes cannot be deserialised.</li>
+     *   <li>{@link MalformedTransactionEventException} - the payload is not valid JSON.</li>
+     *   <li>{@link ConstraintViolationException} - the payload is valid JSON but not a valid
+     *       transaction (missing or out-of-range fields).</li>
+     *   <li>{@link UnsupportedCurrencyException} - no threshold exists for the currency, so the
+     *       evaluation cannot succeed on a redelivery either.</li>
+     * </ul>
+     *
+     * <p>Deliberately not in that list: {@code AccountLockTimeoutException}, which only means
+     * another evaluation of the same account holds the lock, so it is retried with backoff. And
+     * generic {@link IllegalArgumentException} is not classified either: it is too broad to prove
+     * a message is permanently unprocessable, and treating it as poison would silently park
+     * unrelated bugs in the dead letter queue.
+     *
+     * @param kafkaTemplate the template the recoverer publishes dead letters with
+     * @return the configured error handler
+     */
+    @Bean
+    public DefaultErrorHandler transactionErrorHandler(KafkaTemplate<String, Object> kafkaTemplate) {
         ExponentialBackOff backOff = new ExponentialBackOff(500L, 2.0);
         backOff.setMaxInterval(30000L);
         backOff.setMaxElapsedTime(60000L);
@@ -81,8 +106,17 @@ public class KafkaConsumerConfig {
                 kafkaTemplate, (record, ex) -> new org.apache.kafka.common.TopicPartition(record.topic() + "-dlq", -1));
 
         DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer, backOff);
-        errorHandler.addNotRetryableExceptions(SerializationException.class);
+        errorHandler.addNotRetryableExceptions(
+                SerializationException.class,
+                MalformedTransactionEventException.class,
+                ConstraintViolationException.class,
+                UnsupportedCurrencyException.class);
+        return errorHandler;
+    }
 
+    private void configureListenerContainerFactory(
+            ConcurrentKafkaListenerContainerFactory<?, ?> factory,
+            DefaultErrorHandler errorHandler) {
         factory.setCommonErrorHandler(errorHandler);
         factory.setConcurrency(3);
     }

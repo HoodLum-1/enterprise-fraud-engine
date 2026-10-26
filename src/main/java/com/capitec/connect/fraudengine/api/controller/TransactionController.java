@@ -5,7 +5,7 @@ import com.capitec.connect.fraudengine.api.dto.response.EvaluationSummaryRespons
 import com.capitec.connect.fraudengine.api.dto.response.FraudAlertResponseDto;
 import com.capitec.connect.fraudengine.api.dto.response.TransactionDetailsResponseDto;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
-import com.capitec.connect.fraudengine.engine.service.FraudEvaluationService;
+import com.capitec.connect.fraudengine.engine.service.HttpEvaluationService;
 import com.capitec.connect.fraudengine.engine.service.TransactionQueryService;
 import com.capitec.connect.fraudengine.infrastructure.security.AccountAccessPolicy;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
@@ -31,7 +31,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class TransactionController {
 
-    private final FraudEvaluationService fraudEvaluationService;
+    private final HttpEvaluationService httpEvaluationService;
     private final FraudAlertMapper fraudAlertMapper;
     private final TransactionQueryService transactionQueryService;
     private final AccountAccessPolicy accountAccessPolicy;
@@ -41,7 +41,7 @@ public class TransactionController {
             @Valid @RequestBody TransactionRequestDto requestDto) {
         log.info("Received transaction evaluation request for transaction id: {}", requestDto.id());
 
-        EvaluationSummary summary = fraudEvaluationService.evaluate(requestDto);
+        EvaluationSummary summary = httpEvaluationService.evaluate(requestDto);
         EvaluationSummaryResponseDto responseDto = toResponseDto(summary);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(responseDto);

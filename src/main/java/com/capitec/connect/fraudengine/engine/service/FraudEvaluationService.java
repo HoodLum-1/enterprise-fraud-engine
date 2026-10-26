@@ -4,7 +4,6 @@ import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException;
 import com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException;
 import com.capitec.connect.fraudengine.api.exception.EvaluationUnavailableException;
-import com.capitec.connect.fraudengine.api.exception.RateLimitExceededException;
 import com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.domain.model.Transaction;
@@ -15,12 +14,10 @@ import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
 import com.capitec.connect.fraudengine.infrastructure.metrics.FraudMetrics;
 import com.capitec.connect.fraudengine.infrastructure.mapper.TransactionMapper;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
-import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import com.capitec.connect.fraudengine.infrastructure.repository.FraudAlertRepository;
 import com.capitec.connect.fraudengine.infrastructure.repository.TransactionRepository;
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
-import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -48,8 +45,12 @@ public class FraudEvaluationService {
     private final FraudMetrics fraudMetrics;
 
     /**
-     * Evaluates a transaction for fraud with circuit breaker and rate limiting protection.
+     * Evaluates a transaction for fraud with circuit breaker protection.
      * Rejects requests when the engine is unavailable rather than returning an unverified result.
+     *
+     * <p>There is no rate limiter here on purpose. The HTTP quota is enforced by
+     * {@link HttpEvaluationService}; the Kafka ingestion path calls this method directly and must
+     * not be rejected by, or consume, that quota.
      *
      * <p>The isolation level is pinned to READ COMMITTED, which is the PostgreSQL default. The
      * account lock serialises concurrent evaluations of the same account, and lock-then-read is
@@ -62,7 +63,6 @@ public class FraudEvaluationService {
      */
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @CircuitBreaker(name = "fraudEngine", fallbackMethod = "evaluateFallback")
-    @RateLimiter(name = "fraudEngine")
     public EvaluationSummary evaluate(TransactionRequestDto dto) {
         log.info("Processing transaction evaluation for id: {}, accountId: {}", dto.id(), dto.accountId());
         Timer.Sample sample = fraudMetrics.startEvaluation();
@@ -109,11 +109,6 @@ public class FraudEvaluationService {
      * @return evaluation summary
      */
     EvaluationSummary evaluateFallback(TransactionRequestDto dto, Exception ex) {
-        if (ex instanceof RequestNotPermitted) {
-            log.warn("Rate limit rejected transaction evaluation for {}", dto.id());
-            fraudMetrics.recordRejection("rate_limit");
-            throw new RateLimitExceededException(ex);
-        }
         if (ex instanceof DuplicateTransactionException duplicate) {
             throw duplicate;
         }
