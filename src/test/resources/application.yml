@@ -46,7 +46,7 @@ fraud:
     evaluation:
       history-window: PT24H
       max-future-skew: PT5M
-    max-past-skew: P7D
+      max-past-skew: P7D
     lock:
       # H2 has no advisory lock support; the unit tests use the no-op implementation.
       enabled: false

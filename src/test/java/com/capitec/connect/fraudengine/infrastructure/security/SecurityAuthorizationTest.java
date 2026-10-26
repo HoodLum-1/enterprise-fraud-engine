@@ -9,6 +9,8 @@ import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequ
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -65,6 +67,7 @@ class SecurityAuthorizationTest {
 
     @Test
     void transactionEvaluation_requiresIngestorRoleAndAcceptsAuthorizedBearer() throws Exception {
+        // Relative to the test clock: a fixed date would age past max-past-skew and start failing.
         String payload = """
             {
               "id":"%s",
@@ -74,9 +77,9 @@ class SecurityAuthorizationTest {
               "category":"GROCERIES",
               "merchantName":"Market",
               "location":"Cape Town",
-              "timestamp":"2026-10-19T10:00:00Z"
+              "timestamp":"%s"
             }
-            """.formatted(UUID.randomUUID());
+            """.formatted(UUID.randomUUID(), Instant.now().minusSeconds(60));
 
         mockMvc.perform(post("/api/v1/transactions/evaluate")
                 .contentType(MediaType.APPLICATION_JSON)

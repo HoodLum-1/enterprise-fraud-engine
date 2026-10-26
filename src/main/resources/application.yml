@@ -52,7 +52,7 @@ fraud:
     evaluation:
       history-window: PT24H
       max-future-skew: PT5M
-    max-past-skew: P7D
+      max-past-skew: P7D
     lock:
       enabled: true
       timeout: PT2S
