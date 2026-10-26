@@ -58,14 +58,16 @@ Do not enable the `dev` profile in a deployed environment.
 
 | Method | Path | Access / behavior |
 |---|---|---|
-| `POST` | `/api/v1/transactions/evaluate` | `TRANSACTION_INGESTOR` or `FRAUD_ANALYST`; evaluates and persists a transaction (`201`) |
+| `POST` | `/api/v1/transactions/evaluate` | `TRANSACTION_INGESTOR` or `FRAUD_ANALYST`; evaluates and persists a transaction (`201`), or returns the stored evaluation when the same transaction ID is submitted again (`200`) |
 | `GET` | `/api/v1/transactions/{transactionId}` | Account owner or analyst; returns transaction details and alerts |
 | `GET` | `/api/v1/fraud-alerts/account/{accountId}` | Account owner or analyst; supports `severity`, `ruleName`, `from`, `to`, `page`, `size`, and `sort` |
 | `GET` | `/api/v1/fraud-cases` | `FRAUD_ANALYST`; pageable case list |
 | `GET` | `/api/v1/fraud-cases/transaction/{transactionId}` | `FRAUD_ANALYST`; retrieves the case associated with a transaction |
 | `PATCH` | `/api/v1/fraud-cases/{transactionId}/status?status=...` | `FRAUD_ANALYST`; case-status update records the actor and uses optimistic locking |
 
-JWT account ownership is checked against the account claim. Public endpoints are limited to health, Swagger UI, and OpenAPI documentation. Evaluation errors use RFC 7807 problem details: `400` for invalid/unsupported input, `401`/`403` for authentication/authorization, `409` for duplicate transaction IDs, `429` with `Retry-After` for rate limiting, and `503` with `Retry-After` when evaluation is unavailable or the account is busy with other evaluations. A caller who is not the account holder gets `404` for both a missing transaction and one that belongs to someone else, so the two answers cannot be told apart. Account holders see an alert's severity and timing but not its rule name or risk score; analysts see both.
+JWT account ownership is checked against the account claim. Public endpoints are limited to health, Swagger UI, and OpenAPI documentation. Evaluation errors use RFC 7807 problem details: `400` for invalid/unsupported input, `401`/`403` for authentication/authorization, `409` when a transaction ID already holds a different transaction, `429` with `Retry-After` for rate limiting, and `503` with `Retry-After` when evaluation is unavailable or the account is busy with other evaluations. A caller who is not the account holder gets `404` for both a missing transaction and one that belongs to someone else, so the two answers cannot be told apart. Account holders see an alert's severity and timing but not its rule name or risk score; analysts see both.
+
+Transaction IDs are idempotency keys: submitting one again is safe. A retry that describes the same transaction is answered with `200` and the evaluation already stored, rather than a conflict the caller cannot resolve or a second evaluation of a transaction that is now in its own history. The stored transaction is never replaced, so only a genuinely different transaction under an existing ID is refused with `409`. Concurrent submissions of one ID resolve to a replay or a conflict, never a server error.
 
 ### Kafka contracts
 

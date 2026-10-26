@@ -21,6 +21,12 @@ paths:
         Requires TRANSACTION_INGESTOR or FRAUD_ANALYST. A successful response is
         persisted before it is returned; a fraud case is created asynchronously only
         if the evaluation triggers a rule.
+
+        The transaction ID identifies the request, so submitting the same ID again is
+        safe. A retry that describes the same transaction returns 200 with the
+        evaluation that was already stored rather than evaluating it a second time;
+        only a retry that describes a different transaction under that ID is refused
+        with 409. The stored transaction is never replaced.
       security:
         - BearerAuth: []
       requestBody:
@@ -39,6 +45,15 @@ paths:
               location: Cape Town
               timestamp: '2026-10-10T20:00:00Z'
       responses:
+        '200':
+          description: >
+            This transaction ID already held the same transaction; the stored
+            evaluation is returned unchanged. The body is identical to the 201 the
+            first submission received.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluationSummary'
         '201':
           description: Transaction evaluated and persisted.
           content:
@@ -52,7 +67,9 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: Duplicate transaction ID.
+          description: >
+            The transaction ID is already held by a different transaction. The stored
+            transaction is left as it is.
           content:
             application/problem+json:
               schema:

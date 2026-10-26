@@ -5,6 +5,7 @@ import com.capitec.connect.fraudengine.api.dto.response.EvaluationSummaryRespons
 import com.capitec.connect.fraudengine.api.dto.response.FraudAlertResponseDto;
 import com.capitec.connect.fraudengine.api.dto.response.TransactionDetailsResponseDto;
 import com.capitec.connect.fraudengine.api.exception.TransactionNotFoundException;
+import com.capitec.connect.fraudengine.domain.model.EvaluationOutcome;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.engine.service.HttpEvaluationService;
 import com.capitec.connect.fraudengine.engine.service.TransactionQueryService;
@@ -44,10 +45,14 @@ public class TransactionController {
             @Valid @RequestBody TransactionRequestDto requestDto) {
         log.info("Received transaction evaluation request for transaction id: {}", requestDto.id());
 
-        EvaluationSummary summary = httpEvaluationService.evaluate(requestDto);
-        EvaluationSummaryResponseDto responseDto = toResponseDto(summary);
+        EvaluationOutcome outcome = httpEvaluationService.evaluate(requestDto);
+        EvaluationSummaryResponseDto responseDto = toResponseDto(outcome.summary());
 
-        return ResponseEntity.status(HttpStatus.CREATED).body(responseDto);
+        // 201 when the transaction was stored, 200 when the request repeated an id that already
+        // holds this same transaction. The body is the same evaluation either way, so the status
+        // is the only thing that tells a caller whether its earlier attempt reached us.
+        return ResponseEntity.status(outcome.created() ? HttpStatus.CREATED : HttpStatus.OK)
+            .body(responseDto);
     }
 
     @GetMapping("/{transactionId}")

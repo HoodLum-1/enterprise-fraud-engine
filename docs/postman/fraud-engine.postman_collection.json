@@ -145,6 +145,8 @@
 							"if (jsonData.alerts && jsonData.alerts.length > 0) {",
 							"    pm.collectionVariables.set('lastAlertId', jsonData.alerts[0].id);",
 							"}",
+							"// Kept so the retry below can prove it got this evaluation back, not a new one.",
+							"pm.collectionVariables.set('highAmountEvaluationText', pm.response.text());",
 							"pm.collectionVariables.set('lastHighAmountTxId', jsonData.transactionId);"
 						],
 						"type": "text/javascript"
@@ -179,7 +181,67 @@
 			"response": []
 		},
 		{
-			"name": "3. Evaluate Duplicate Transaction (Idempotency 409 Conflict)",
+			"name": "3. Retry High-Amount Transaction (Idempotency 200 Replay)",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"// The same transaction, submitted again exactly as it was submitted the first",
+							"// time. This is what a client does when it never saw the 201: it is an",
+							"// ordinary retry, so it is answered with the evaluation already stored",
+							"// rather than with a conflict the caller cannot resolve.",
+							"pm.test('Status code is 200 OK, not 201 or 409', function () {",
+							"    pm.response.to.have.status(200);",
+							"});",
+							"",
+							"const jsonData = pm.response.json();",
+							"pm.test('The replay carries the evaluation that is already stored', function () {",
+							"    pm.expect(jsonData.transactionId).to.eql(pm.collectionVariables.get('highAmountTxId'));",
+							"    pm.expect(jsonData.totalRiskScore).to.be.at.least(40);",
+							"    pm.expect(jsonData.overallSeverity).to.eql('HIGH');",
+							"    pm.expect(jsonData.alerts).to.be.an('array').that.is.not.empty;",
+							"    pm.expect(jsonData.alerts[0].ruleName).to.eql('HighAmountRule');",
+							"});",
+							"",
+							"pm.test('The replay is the very body the first call returned', function () {",
+							"    pm.expect(pm.response.text()).to.eql(",
+							"        pm.collectionVariables.get('highAmountEvaluationText'));",
+							"});"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"id\": \"{{highAmountTxId}}\",\n    \"accountId\": \"{{accountId}}\",\n    \"amount\": 75000.00,\n    \"currency\": \"ZAR\",\n    \"category\": \"ELECTRONICS\",\n    \"merchantName\": \"Luxury Tech Cape Town\",\n    \"location\": \"Cape Town\",\n    \"timestamp\": \"{{currentTimestamp}}\"\n}"
+				},
+				"url": {
+					"raw": "{{baseUrl}}/api/v1/transactions/evaluate",
+					"host": [
+						"{{baseUrl}}"
+					],
+					"path": [
+						"api",
+						"v1",
+						"transactions",
+						"evaluate"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "4. Evaluate Duplicate Transaction (Idempotency 409 Conflict)",
 			"event": [
 				{
 					"listen": "test",
@@ -210,7 +272,7 @@
 				],
 				"body": {
 					"mode": "raw",
-					"raw": "{\n    \"id\": \"{{lastTransactionId}}\",\n    \"accountId\": \"{{accountId}}\",\n    \"amount\": 250.00,\n    \"currency\": \"ZAR\",\n    \"category\": \"RETAIL\",\n    \"merchantName\": \"Supermarket Express\",\n    \"location\": \"Cape Town\",\n    \"timestamp\": \"{{currentTimestamp}}\"\n}"
+					"raw": "{\n    \"id\": \"{{lastTransactionId}}\",\n    \"accountId\": \"{{accountId}}\",\n    \"amount\": 999.99,\n    \"currency\": \"ZAR\",\n    \"category\": \"RETAIL\",\n    \"merchantName\": \"Supermarket Express\",\n    \"location\": \"Cape Town\",\n    \"timestamp\": \"{{currentTimestamp}}\"\n}"
 				},
 				"url": {
 					"raw": "{{baseUrl}}/api/v1/transactions/evaluate",
@@ -228,7 +290,7 @@
 			"response": []
 		},
 		{
-			"name": "4. Validation Failure (400 Bad Request)",
+			"name": "5. Validation Failure (400 Bad Request)",
 			"event": [
 				{
 					"listen": "test",
@@ -276,7 +338,7 @@
 			"response": []
 		},
 		{
-			"name": "5. Get Transaction by ID",
+			"name": "6. Get Transaction by ID",
 			"event": [
 				{
 					"listen": "test",
@@ -315,7 +377,7 @@
 			"response": []
 		},
 		{
-			"name": "6. Get Fraud Alerts for Account",
+			"name": "7. Get Fraud Alerts for Account",
 			"event": [
 				{
 					"listen": "test",
@@ -371,7 +433,7 @@
 			"response": []
 		},
 		{
-			"name": "7. List Fraud Cases",
+			"name": "8. List Fraud Cases",
 			"request": {
 				"method": "GET",
 				"header": [],
@@ -413,7 +475,7 @@
 			"response": []
 		},
 		{
-			"name": "8. Get Fraud Case by Transaction",
+			"name": "9. Get Fraud Case by Transaction",
 			"request": {
 				"method": "GET",
 				"header": [],
@@ -456,7 +518,7 @@
 			"response": []
 		},
 		{
-			"name": "9. Update Fraud Case Status",
+			"name": "10. Update Fraud Case Status",
 			"request": {
 				"method": "PATCH",
 				"header": [],
@@ -501,7 +563,7 @@
 			"response": []
 		},
 		{
-			"name": "10. Actuator Health Endpoint",
+			"name": "11. Actuator Health Endpoint",
 			"event": [
 				{
 					"listen": "test",
@@ -537,7 +599,7 @@
 			"response": []
 		},
 		{
-			"name": "11. Actuator Prometheus Metrics Endpoint",
+			"name": "12. Actuator Prometheus Metrics Endpoint",
 			"event": [
 				{
 					"listen": "test",

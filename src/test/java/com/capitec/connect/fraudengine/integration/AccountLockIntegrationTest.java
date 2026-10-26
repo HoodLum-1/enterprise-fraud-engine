@@ -2,6 +2,7 @@ package com.capitec.connect.fraudengine.integration;
 
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException;
+import com.capitec.connect.fraudengine.domain.model.EvaluationOutcome;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.engine.service.AccountLock;
 import com.capitec.connect.fraudengine.engine.service.FraudEvaluationService;
@@ -141,20 +142,20 @@ class AccountLockIntegrationTest {
         CyclicBarrier startTogether = new CyclicBarrier(3);
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            Callable<EvaluationSummary> evaluateFirst = () -> {
+            Callable<EvaluationOutcome> evaluateFirst = () -> {
                 startTogether.await(5, TimeUnit.SECONDS);
                 return fraudEvaluationService.evaluate(first);
             };
-            Callable<EvaluationSummary> evaluateSecond = () -> {
+            Callable<EvaluationOutcome> evaluateSecond = () -> {
                 startTogether.await(5, TimeUnit.SECONDS);
                 return fraudEvaluationService.evaluate(second);
             };
-            Future<EvaluationSummary> firstResult = executor.submit(evaluateFirst);
-            Future<EvaluationSummary> secondResult = executor.submit(evaluateSecond);
+            Future<EvaluationOutcome> firstResult = executor.submit(evaluateFirst);
+            Future<EvaluationOutcome> secondResult = executor.submit(evaluateSecond);
 
             startTogether.await(5, TimeUnit.SECONDS);
-            EvaluationSummary firstSummary = firstResult.get(30, TimeUnit.SECONDS);
-            EvaluationSummary secondSummary = secondResult.get(30, TimeUnit.SECONDS);
+            EvaluationSummary firstSummary = firstResult.get(30, TimeUnit.SECONDS).summary();
+            EvaluationSummary secondSummary = secondResult.get(30, TimeUnit.SECONDS).summary();
 
             long velocityAlerts = Stream.of(firstSummary, secondSummary)
                 .flatMap(summary -> summary.alerts().stream())

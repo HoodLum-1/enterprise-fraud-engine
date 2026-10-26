@@ -176,7 +176,7 @@ class FraudEngineIntegrationTest {
     }
 
     @Test
-    void evaluateTransaction_duplicateId_shouldReturn409Conflict() throws Exception {
+    void evaluateTransaction_duplicateIdWithDifferentData_shouldReturn409Conflict() throws Exception {
         UUID fixedId = UUID.randomUUID();
         TransactionRequestDto request = IntegrationTestDataFactory.duplicateTransaction(fixedId)
             .accountId("ACC-INT-003")
@@ -187,12 +187,24 @@ class FraudEngineIntegrationTest {
                 .content(objectMapper.writeValueAsString(request)))
             .andExpect(status().isCreated());
 
+        // The id is already held by a different transaction, so accepting this one would replace
+        // it and orphan the alerts evaluated from it. A retry that describes the same transaction
+        // is a replay rather than a conflict; see TransactionIdempotencyIntegrationTest.
+        TransactionRequestDto conflicting = IntegrationTestDataFactory.duplicateTransaction(fixedId)
+            .accountId("ACC-INT-003")
+            .amount(new BigDecimal("12345.67"))
+            .build();
+
         mockMvc.perform(post("/api/v1/transactions/evaluate")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(request)))
+                .content(objectMapper.writeValueAsString(conflicting)))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.title").value("Conflict"))
             .andExpect(jsonPath("$.detail").exists());
+
+        assertEquals(new BigDecimal("100.00"),
+            transactionRepository.findById(fixedId).orElseThrow().getAmount(),
+            "the conflicting request must not have replaced the stored transaction");
     }
 
     @Test

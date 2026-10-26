@@ -5,6 +5,7 @@ import com.capitec.connect.fraudengine.api.dto.response.TransactionDetailsRespon
 import com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException;
 import com.capitec.connect.fraudengine.api.exception.TransactionNotFoundException;
 import com.capitec.connect.fraudengine.api.exception.GlobalExceptionHandler;
+import com.capitec.connect.fraudengine.domain.model.EvaluationOutcome;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.domain.model.FraudAlert;
 import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
@@ -104,7 +105,8 @@ class TransactionControllerTest {
             List.of(alert)
         );
 
-        when(httpEvaluationService.evaluate(any(TransactionRequestDto.class))).thenReturn(summary);
+        when(httpEvaluationService.evaluate(any(TransactionRequestDto.class)))
+            .thenReturn(EvaluationOutcome.created(summary));
 
         mockMvc.perform(post("/api/v1/transactions/evaluate")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -116,6 +118,44 @@ class TransactionControllerTest {
             .andExpect(jsonPath("$.overallSeverity").value("HIGH"))
             .andExpect(jsonPath("$.isFraudulent").value(true))
             .andExpect(jsonPath("$.alerts[0].ruleName").value("HighAmountRule"));
+    }
+
+    @Test
+    void aRetryOfTheSameRequestIsAnsweredWith200AndTheIdenticalEvaluation() throws Exception {
+        TransactionRequestDto requestDto = FraudTestDataFactory.transactionRequest()
+            .amount(new BigDecimal("60000.00"))
+            .build();
+
+        FraudAlert alert = FraudTestDataFactory.fraudAlert()
+            .transactionId(requestDto.id())
+            .riskScore(40)
+            .severity(Severity.HIGH)
+            .reason("High amount transaction")
+            .build();
+        RuleEvaluationResult result =
+            new RuleEvaluationResult("HighAmountRule", true, 40, Severity.HIGH, "High amount transaction");
+        EvaluationSummary summary = FraudTestDataFactory.evaluationSummary(
+            requestDto.id(), "ACC-1001", 40, Severity.HIGH, List.of(result), List.of(alert));
+        String payload = objectMapper.writeValueAsString(requestDto);
+
+        when(httpEvaluationService.evaluate(any(TransactionRequestDto.class)))
+            .thenReturn(EvaluationOutcome.created(summary));
+        String created = mockMvc.perform(post("/api/v1/transactions/evaluate")
+                .contentType(MediaType.APPLICATION_JSON).content(payload))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+
+        when(httpEvaluationService.evaluate(any(TransactionRequestDto.class)))
+            .thenReturn(EvaluationOutcome.replayed(summary));
+        String replayed = mockMvc.perform(post("/api/v1/transactions/evaluate")
+                .contentType(MediaType.APPLICATION_JSON).content(payload))
+            .andExpect(status().isOk())
+            .andReturn().getResponse().getContentAsString();
+
+        // A client that never saw the 201 has to be able to recognise its own earlier success
+        // from the body alone, so the two answers must be the same evaluation.
+        assertEquals(created, replayed,
+            "a replay must return exactly what the first evaluation returned");
     }
 
     @Test

@@ -2,7 +2,7 @@ package com.capitec.connect.fraudengine.engine.service;
 
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.exception.RateLimitExceededException;
-import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
+import com.capitec.connect.fraudengine.domain.model.EvaluationOutcome;
 import com.capitec.connect.fraudengine.infrastructure.metrics.FraudMetrics;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
 import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
@@ -27,7 +27,7 @@ public class HttpEvaluationService {
     private final FraudMetrics fraudMetrics;
 
     @RateLimiter(name = "fraudEngine", fallbackMethod = "rateLimited")
-    public EvaluationSummary evaluate(TransactionRequestDto dto) {
+    public EvaluationOutcome evaluate(TransactionRequestDto dto) {
         return fraudEvaluationService.evaluate(dto);
     }
 
@@ -38,7 +38,7 @@ public class HttpEvaluationService {
      * @param ex the rate limiter rejection
      * @return never returns normally
      */
-    EvaluationSummary rateLimited(TransactionRequestDto dto, RequestNotPermitted ex) {
+    EvaluationOutcome rateLimited(TransactionRequestDto dto, RequestNotPermitted ex) {
         log.warn("Rate limit rejected transaction evaluation for {}", dto.id());
         fraudMetrics.recordRejection("rate_limit");
         throw new RateLimitExceededException(ex);

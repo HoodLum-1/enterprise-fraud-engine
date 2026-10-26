@@ -3,12 +3,14 @@ package com.capitec.connect.fraudengine.engine.service;
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException;
 import com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException;
+import com.capitec.connect.fraudengine.domain.model.EvaluationOutcome;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.domain.model.FraudAlert;
 import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.domain.model.Transaction;
 import com.capitec.connect.fraudengine.engine.FraudEngine;
+import com.capitec.connect.fraudengine.infrastructure.entity.FraudAlertEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.TransactionEntity;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
 import com.capitec.connect.fraudengine.infrastructure.mapper.TransactionMapper;
@@ -22,6 +24,8 @@ import com.capitec.connect.fraudengine.util.FraudTestDataFactory;
 import com.capitec.connect.fraudengine.api.exception.EvaluationUnavailableException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -38,6 +42,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -66,8 +71,10 @@ class FraudEvaluationServiceTest {
     @Mock
     private AccountLock accountLock;
 
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+
     @Spy
-    private FraudMetrics fraudMetrics = new FraudMetrics(new SimpleMeterRegistry());
+    private FraudMetrics fraudMetrics = new FraudMetrics(meterRegistry);
 
     @Spy
     private TransactionMapper transactionMapper = new TransactionMapper();
@@ -93,20 +100,158 @@ class FraudEvaluationServiceTest {
     }
 
     @Test
-    void testEvaluate_ThrowsDuplicateTransactionException_WhenTransactionExists() {
-        when(transactionRepository.existsById(txId)).thenReturn(true);
+    void aRetryOfTheSameTransactionReplaysTheStoredEvaluationInsteadOfEvaluatingAgain() {
+        TransactionEntity stored = transactionMapper.toEntity(transactionMapper.toDomain(requestDto));
+        when(transactionRepository.findById(txId)).thenReturn(Optional.of(stored));
+        when(fraudAlertRepository.findByTransactionIdOrderByFlaggedAtDesc(txId)).thenReturn(List.of(
+            alertEntity(txId, "HighAmountRule", 40, Severity.HIGH),
+            alertEntity(txId, "TransactionVelocityRule", 25, Severity.MEDIUM)));
 
-        assertThrows(DuplicateTransactionException.class, () -> fraudEvaluationService.evaluate(requestDto));
+        EvaluationOutcome outcome = fraudEvaluationService.evaluate(requestDto);
 
-        verify(transactionRepository).existsById(txId);
+        // The whole point of a retry: the caller is told what already happened, not asked to
+        // interpret a conflict for a request it believes it never got an answer to.
+        assertFalse(outcome.created(), "a retry must not be reported as a new transaction");
+        assertEquals(txId, outcome.summary().transactionId());
+        assertEquals("ACC-1001", outcome.summary().accountId());
+        assertEquals(65, outcome.summary().totalRiskScore());
+        assertEquals(Severity.HIGH, outcome.summary().overallSeverity());
+        assertTrue(outcome.summary().isFraudulent());
+        assertEquals(2, outcome.summary().alerts().size());
+        assertEquals(2, outcome.summary().triggeredRules().size());
+
         verify(transactionRepository, never()).save(any());
         verify(fraudEngine, never()).evaluate(any(), any());
         verify(fraudAlertRepository, never()).saveAll(any());
+        verify(evaluationOutboxService, never()).enqueueEvaluation(any(), any());
+    }
+
+    @Test
+    void aReplayOfATransactionWithNoFindingsIsStillTheStoredCleanEvaluation() {
+        TransactionEntity stored = transactionMapper.toEntity(transactionMapper.toDomain(requestDto));
+        when(transactionRepository.findById(txId)).thenReturn(Optional.of(stored));
+        when(fraudAlertRepository.findByTransactionIdOrderByFlaggedAtDesc(txId)).thenReturn(List.of());
+
+        EvaluationOutcome outcome = fraudEvaluationService.evaluate(requestDto);
+
+        assertFalse(outcome.created());
+        assertEquals(0, outcome.summary().totalRiskScore());
+        assertEquals(Severity.LOW, outcome.summary().overallSeverity());
+        assertFalse(outcome.summary().isFraudulent());
+        assertTrue(outcome.summary().alerts().isEmpty());
+        assertTrue(outcome.summary().triggeredRules().isEmpty());
+    }
+
+    @Test
+    void theSameIdHoldingADifferentTransactionIsRefusedRatherThanReplaced() {
+        TransactionEntity stored = transactionMapper.toEntity(transactionMapper.toDomain(requestDto));
+        stored.setAmount(new BigDecimal("1.00"));
+        when(transactionRepository.findById(txId)).thenReturn(Optional.of(stored));
+
+        // Accepting this would silently replace a stored transaction and orphan every alert that
+        // was evaluated from it, so the id can only ever hold the one transaction.
+        assertThrows(DuplicateTransactionException.class, () -> fraudEvaluationService.evaluate(requestDto));
+
+        verify(transactionRepository, never()).save(any());
+        verify(fraudEngine, never()).evaluate(any(), any());
+        verify(fraudAlertRepository, never()).saveAll(any());
+        verify(evaluationOutboxService, never()).enqueueEvaluation(any(), any());
+    }
+
+    @Test
+    void theSameIdAtADifferentEventTimeIsAlsoADifferentTransaction() {
+        TransactionEntity stored = transactionMapper.toEntity(transactionMapper.toDomain(requestDto));
+        stored.setTimestamp(stored.getTimestamp().plusSeconds(1));
+        when(transactionRepository.findById(txId)).thenReturn(Optional.of(stored));
+
+        assertThrows(DuplicateTransactionException.class, () -> fraudEvaluationService.evaluate(requestDto));
+
+        verify(transactionRepository, never()).save(any());
+    }
+
+    @Test
+    void aLoserOfARaceToInsertOneIdIsAnsweredFromTheWinnerRatherThanReportedAsAnOutage() {
+        TransactionEntity stored = transactionMapper.toEntity(transactionMapper.toDomain(requestDto));
+        when(transactionRepository.findById(txId)).thenReturn(Optional.of(stored));
+        when(fraudAlertRepository.findByTransactionIdOrderByFlaggedAtDesc(txId)).thenReturn(List.of(
+            alertEntity(txId, "HighAmountRule", 40, Severity.HIGH)));
+
+        EvaluationOutcome outcome = fraudEvaluationService.evaluateFallback(requestDto,
+            new DataIntegrityViolationException("duplicate key value violates unique constraint"));
+
+        assertFalse(outcome.created(), "the loser of the race is still a replay");
+        assertEquals(40, outcome.summary().totalRiskScore());
+        assertEquals(Severity.HIGH, outcome.summary().overallSeverity());
+        // Nothing that only happens once the row is genuinely ours may have run.
+        verify(evaluationOutboxService, never()).enqueueEvaluation(any(), any());
+        verify(fraudAlertRepository, never()).saveAll(any());
+        assertEquals(1.0, rejections("duplicate"));
+        assertEquals(0.0, rejections("engine_unavailable"),
+            "a client that retried must not be told its evaluation never happened");
+    }
+
+    @Test
+    void aLoserWhoseWinnerStoredSomethingElseIsStillRefused() {
+        TransactionEntity stored = transactionMapper.toEntity(transactionMapper.toDomain(requestDto));
+        stored.setCategory("TRAVEL");
+        when(transactionRepository.findById(txId)).thenReturn(Optional.of(stored));
+
+        assertThrows(DuplicateTransactionException.class, () -> fraudEvaluationService.evaluateFallback(
+            requestDto, new DataIntegrityViolationException("duplicate key value violates unique constraint")));
+
+        assertEquals(1.0, rejections("duplicate"));
+    }
+
+    @Test
+    void aConstraintFailureThatIsNotADuplicateIsNotInventedIntoOne() {
+        // Nothing to read back, so the write failed for some other reason. Claiming a duplicate
+        // here would hide the real cause behind a message about the transaction id.
+        when(transactionRepository.findById(txId)).thenReturn(Optional.empty());
+
+        DataIntegrityViolationException original =
+            new DataIntegrityViolationException("value too long for type character varying(50)");
+
+        assertThrows(DataIntegrityViolationException.class,
+            () -> fraudEvaluationService.evaluateFallback(requestDto, original));
+
+        assertEquals(1.0, rejections("duplicate"));
+        assertEquals(0.0, rejections("engine_unavailable"));
+    }
+
+    @Test
+    void aDuplicateThatCannotBeReadBackIsStillAConflictRatherThanAnOutage() {
+        when(transactionRepository.findById(txId))
+            .thenThrow(new DataAccessResourceFailureException("connection reset"));
+
+        DuplicateTransactionException thrown = assertThrows(DuplicateTransactionException.class,
+            () -> fraudEvaluationService.evaluateFallback(
+                requestDto, new DataIntegrityViolationException("duplicate key value violates unique constraint")));
+
+        assertEquals("Transaction already exists with id: " + txId, thrown.getMessage());
+        assertEquals(1.0, rejections("duplicate"));
+    }
+
+    private FraudAlertEntity alertEntity(UUID transactionId, String ruleName, int riskScore, Severity severity) {
+        return FraudAlertEntity.builder()
+            .id(UUID.randomUUID())
+            .transactionId(transactionId)
+            .accountId("ACC-1001")
+            .ruleName(ruleName)
+            .riskScore(riskScore)
+            .severity(severity)
+            .reason(ruleName + " triggered")
+            .flaggedAt(Instant.now())
+            .build();
+    }
+
+    private double rejections(String reason) {
+        var counter = meterRegistry.find("fraud.evaluation.rejections").tag("reason", reason).counter();
+        return counter == null ? 0 : counter.count();
     }
 
     @Test
     void testEvaluate_SuccessfulEvaluation_WithAlertsPersisted() {
-        when(transactionRepository.existsById(txId)).thenReturn(false);
+        when(transactionRepository.findById(txId)).thenReturn(Optional.empty());
 
         TransactionEntity historyEntity = FraudTestDataFactory.transactionEntity()
                 .accountId("ACC-1001")
@@ -142,7 +287,7 @@ class FraudEvaluationServiceTest {
 
         when(fraudEngine.evaluate(any(Transaction.class), anyList())).thenReturn(expectedSummary);
 
-        EvaluationSummary actualSummary = fraudEvaluationService.evaluate(requestDto);
+        EvaluationSummary actualSummary = fraudEvaluationService.evaluate(requestDto).summary();
 
         assertNotNull(actualSummary);
         assertEquals(txId, actualSummary.transactionId());
@@ -159,7 +304,7 @@ class FraudEvaluationServiceTest {
 
     @Test
     void testEvaluate_SuccessfulEvaluation_WithoutAlerts() {
-        when(transactionRepository.existsById(txId)).thenReturn(false);
+        when(transactionRepository.findById(txId)).thenReturn(Optional.empty());
         when(accountHistoryService.findHistory(eq("ACC-1001"), any(Instant.class), any(Instant.class)))
                 .thenReturn(List.of());
 
@@ -174,7 +319,7 @@ class FraudEvaluationServiceTest {
 
         when(fraudEngine.evaluate(any(Transaction.class), anyList())).thenReturn(expectedSummary);
 
-        EvaluationSummary actualSummary = fraudEvaluationService.evaluate(requestDto);
+        EvaluationSummary actualSummary = fraudEvaluationService.evaluate(requestDto).summary();
 
         assertNotNull(actualSummary);
         assertFalse(actualSummary.isFraudulent());
@@ -187,7 +332,7 @@ class FraudEvaluationServiceTest {
 
     @Test
     void testEvaluate_UsesConfiguredHistoryWindow() {
-        when(transactionRepository.existsById(txId)).thenReturn(false);
+        when(transactionRepository.findById(txId)).thenReturn(Optional.empty());
         when(accountHistoryService.findHistory(eq("ACC-1001"), any(Instant.class), any(Instant.class)))
                 .thenReturn(List.of());
         when(fraudEngine.evaluate(any(Transaction.class), anyList())).thenReturn(
@@ -208,7 +353,7 @@ class FraudEvaluationServiceTest {
 
     @Test
     void evaluateExcludesCurrentTransactionFromHistoryAndReadsBeforeSaving() {
-        when(transactionRepository.existsById(txId)).thenReturn(false);
+        when(transactionRepository.findById(txId)).thenReturn(Optional.empty());
         Transaction current = FraudTestDataFactory.transaction()
             .id(txId)
             .accountId("ACC-1001")
@@ -250,7 +395,7 @@ class FraudEvaluationServiceTest {
 
     @Test
     void accountLockIsTakenBeforeTheDuplicateCheckAndTheHistoryRead() {
-        when(transactionRepository.existsById(txId)).thenReturn(false);
+        when(transactionRepository.findById(txId)).thenReturn(Optional.empty());
         when(accountHistoryService.findHistory(eq("ACC-1001"), any(Instant.class), any(Instant.class)))
             .thenReturn(List.of());
         when(fraudEngine.evaluate(any(Transaction.class), anyList())).thenReturn(
@@ -261,7 +406,7 @@ class FraudEvaluationServiceTest {
 
         InOrder order = inOrder(accountLock, transactionRepository, accountHistoryService);
         order.verify(accountLock).lockForEvaluation("ACC-1001");
-        order.verify(transactionRepository).existsById(txId);
+        order.verify(transactionRepository).findById(txId);
         order.verify(accountHistoryService).findHistory(eq("ACC-1001"), any(Instant.class), any(Instant.class));
     }
 

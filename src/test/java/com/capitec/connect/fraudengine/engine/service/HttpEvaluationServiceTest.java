@@ -3,6 +3,7 @@ package com.capitec.connect.fraudengine.engine.service;
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException;
 import com.capitec.connect.fraudengine.api.exception.RateLimitExceededException;
+import com.capitec.connect.fraudengine.domain.model.EvaluationOutcome;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.infrastructure.metrics.FraudMetrics;
@@ -22,8 +23,10 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -61,12 +64,31 @@ class HttpEvaluationServiceTest {
     void itDelegatesToTheEvaluationServiceAndReturnsTheSummaryUnchanged() {
         EvaluationSummary summary = FraudTestDataFactory.evaluationSummary(
             requestDto.id(), "ACC-1001", 0, Severity.LOW, List.of(), List.of());
-        when(fraudEvaluationService.evaluate(requestDto)).thenReturn(summary);
+        EvaluationOutcome outcome = EvaluationOutcome.created(summary);
+        when(fraudEvaluationService.evaluate(requestDto)).thenReturn(outcome);
 
-        EvaluationSummary result = httpEvaluationService.evaluate(requestDto);
+        EvaluationOutcome result = httpEvaluationService.evaluate(requestDto);
 
-        assertSame(summary, result);
+        assertSame(outcome, result);
+        assertSame(summary, result.summary());
+        assertTrue(result.created());
         verify(fraudEvaluationService).evaluate(requestDto);
+    }
+
+    @Test
+    void aReplayStaysAReplaySoTheCallerCanTellItFromAFreshEvaluation() {
+        // The facade is the last thing between the service and the status code. If it rebuilt the
+        // outcome, a retry would come back as 201 and the client would never learn that its
+        // earlier attempt had already succeeded.
+        EvaluationSummary summary = FraudTestDataFactory.evaluationSummary(
+            requestDto.id(), "ACC-1001", 0, Severity.LOW, List.of(), List.of());
+        when(fraudEvaluationService.evaluate(requestDto))
+            .thenReturn(EvaluationOutcome.replayed(summary));
+
+        EvaluationOutcome result = httpEvaluationService.evaluate(requestDto);
+
+        assertSame(summary, result.summary());
+        assertFalse(result.created());
     }
 
     @Test

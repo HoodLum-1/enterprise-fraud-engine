@@ -44,6 +44,7 @@ import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -84,7 +85,7 @@ class AccountIdLogMaskingTest {
         TransactionRepository transactionRepository = mock(TransactionRepository.class);
         FraudAlertRepository fraudAlertRepository = mock(FraudAlertRepository.class);
         FraudEngine engine = mock(FraudEngine.class);
-        when(transactionRepository.existsById(any())).thenReturn(false);
+        when(transactionRepository.findById(any())).thenReturn(Optional.empty());
         when(transactionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(fraudAlertRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         // A rule-free evaluation is enough: the line under test is the one naming the account.
