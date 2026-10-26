@@ -1,8 +1,11 @@
 package com.capitec.connect.fraudengine.api.controller;
 
 import com.capitec.connect.fraudengine.api.dto.response.FraudAlertResponseDto;
+import com.capitec.connect.fraudengine.api.exception.ResourceNotFoundException;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.engine.service.FraudAlertQueryService;
+import com.capitec.connect.fraudengine.infrastructure.logging.LogMasking;
+import com.capitec.connect.fraudengine.infrastructure.security.AlertVisibility;
 import com.capitec.connect.fraudengine.infrastructure.security.AccountAccessPolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +32,7 @@ public class FraudAlertController {
 
     private final FraudAlertQueryService fraudAlertQueryService;
     private final AccountAccessPolicy accountAccessPolicy;
+    private final AlertVisibility alertVisibility;
 
     @GetMapping("/account/{accountId}")
     public ResponseEntity<Page<FraudAlertResponseDto>> getAlertsByAccountId(
@@ -39,13 +43,16 @@ public class FraudAlertController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             @PageableDefault(size = 20, sort = "flaggedAt", direction = Sort.Direction.DESC) Pageable pageable,
             Authentication authentication) {
-        accountAccessPolicy.verifyAccess(accountId, authentication);
+        accountAccessPolicy.verifyAccess(accountId, authentication, ResourceNotFoundException::new);
         if (from != null && to != null && from.isAfter(to)) {
             throw new IllegalArgumentException("'from' must be earlier than or equal to 'to'");
         }
-        log.info("Fetching fraud alerts for account: {}", accountId);
-        return ResponseEntity.ok(fraudAlertQueryService.getAlertsByAccountId(
-            accountId, severity, ruleName, from, to, pageable));
+        log.info("Fetching fraud alerts for account: {}", LogMasking.mask(accountId));
+        Page<FraudAlertResponseDto> alerts = fraudAlertQueryService.getAlertsByAccountId(
+            accountId, severity, ruleName, from, to, pageable);
+        // The rule name and the points it scored describe our own model, so account holders get
+        // the severity and the wording they can act on and nothing else.
+        return ResponseEntity.ok(alerts.map(alert -> alertVisibility.visibleTo(alert, authentication)));
     }
 
 }

@@ -65,7 +65,7 @@ Do not enable the `dev` profile in a deployed environment.
 | `GET` | `/api/v1/fraud-cases/transaction/{transactionId}` | `FRAUD_ANALYST`; retrieves the case associated with a transaction |
 | `PATCH` | `/api/v1/fraud-cases/{transactionId}/status?status=...` | `FRAUD_ANALYST`; case-status update records the actor and uses optimistic locking |
 
-JWT account ownership is checked against the account claim. Public endpoints are limited to health, Swagger UI, and OpenAPI documentation. Evaluation errors use RFC 7807 problem details: `400` for invalid/unsupported input, `401`/`403` for authentication/authorization, `409` for duplicate transaction IDs, `429` with `Retry-After` for rate limiting, and `503` with `Retry-After` when evaluation is unavailable or the account is busy with other evaluations.
+JWT account ownership is checked against the account claim. Public endpoints are limited to health, Swagger UI, and OpenAPI documentation. Evaluation errors use RFC 7807 problem details: `400` for invalid/unsupported input, `401`/`403` for authentication/authorization, `409` for duplicate transaction IDs, `429` with `Retry-After` for rate limiting, and `503` with `Retry-After` when evaluation is unavailable or the account is busy with other evaluations. A caller who is not the account holder gets `404` for both a missing transaction and one that belongs to someone else, so the two answers cannot be told apart. Account holders see an alert's severity and timing but not its rule name or risk score; analysts see both.
 
 ### Kafka contracts
 

@@ -4,11 +4,11 @@ import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.domain.model.FraudAlert;
 import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
 import com.capitec.connect.fraudengine.domain.model.Severity;
+import com.capitec.connect.fraudengine.domain.model.SeverityAssessment;
 import com.capitec.connect.fraudengine.domain.model.Transaction;
 import com.capitec.connect.fraudengine.engine.rule.FraudRule;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -16,7 +16,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-@Slf4j
 @Getter
 @Service
 @RequiredArgsConstructor
@@ -25,7 +24,6 @@ public class FraudEngine {
     private final List<FraudRule> rules;
 
     public EvaluationSummary evaluate(Transaction currentTransaction, List<Transaction> accountHistory) {
-        log.debug("Evaluating transaction: {} with history count: {}", currentTransaction, accountHistory != null ? accountHistory.size() : 0);
         List<RuleEvaluationResult> triggeredResults = new ArrayList<>();
         List<FraudAlert> alerts = new ArrayList<>();
         int cumulativeRiskScore = 0;
@@ -53,7 +51,8 @@ public class FraudEngine {
             }
         }
 
-        Severity overallSeverity = determineOverallSeverity(cumulativeRiskScore, triggeredResults);
+        Severity overallSeverity = SeverityAssessment.assess(cumulativeRiskScore,
+            triggeredResults.stream().map(RuleEvaluationResult::severity).toList());
 
         UUID transactionId = currentTransaction != null ? currentTransaction.id() : null;
         String accountId = currentTransaction != null ? currentTransaction.accountId() : null;
@@ -66,28 +65,5 @@ public class FraudEngine {
             triggeredResults,
             alerts
         );
-    }
-
-    private Severity determineOverallSeverity(int cumulativeRiskScore, List<RuleEvaluationResult> triggeredResults) {
-        if (triggeredResults.isEmpty() || cumulativeRiskScore == 0) {
-            return Severity.LOW;
-        }
-
-        boolean hasCritical = triggeredResults.stream().anyMatch(r -> r.severity() == Severity.CRITICAL);
-        if (hasCritical || cumulativeRiskScore >= 80) {
-            return Severity.CRITICAL;
-        }
-
-        boolean hasHigh = triggeredResults.stream().anyMatch(r -> r.severity() == Severity.HIGH);
-        if (hasHigh || cumulativeRiskScore >= 50) {
-            return Severity.HIGH;
-        }
-
-        boolean hasMedium = triggeredResults.stream().anyMatch(r -> r.severity() == Severity.MEDIUM);
-        if (hasMedium || cumulativeRiskScore >= 25) {
-            return Severity.MEDIUM;
-        }
-
-        return Severity.LOW;
     }
 }

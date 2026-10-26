@@ -122,6 +122,19 @@ public class GlobalExceptionHandler {
         return problemDetail;
     }
 
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ProblemDetail handleResourceNotFoundException(ResourceNotFoundException ex) {
+        log.warn("Resource not found: {}", ex.getMessage());
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
+            HttpStatus.NOT_FOUND,
+            ex.getMessage()
+        );
+        problemDetail.setTitle("Not Found");
+        problemDetail.setType(URI.create("https://api.capitec.com/errors/not-found"));
+        problemDetail.setProperty("timestamp", Instant.now());
+        return problemDetail;
+    }
+
     @ExceptionHandler({RateLimitExceededException.class, RequestNotPermitted.class})
     public ResponseEntity<ProblemDetail> handleRateLimitExceeded(Exception ex) {
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(

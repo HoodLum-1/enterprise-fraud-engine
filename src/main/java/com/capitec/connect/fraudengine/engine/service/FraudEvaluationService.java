@@ -10,6 +10,7 @@ import com.capitec.connect.fraudengine.domain.model.Transaction;
 import com.capitec.connect.fraudengine.engine.FraudEngine;
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudAlertEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.TransactionEntity;
+import com.capitec.connect.fraudengine.infrastructure.logging.LogMasking;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
 import com.capitec.connect.fraudengine.infrastructure.metrics.FraudMetrics;
 import com.capitec.connect.fraudengine.infrastructure.mapper.TransactionMapper;
@@ -64,7 +65,8 @@ public class FraudEvaluationService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     @CircuitBreaker(name = "fraudEngine", fallbackMethod = "evaluateFallback")
     public EvaluationSummary evaluate(TransactionRequestDto dto) {
-        log.info("Processing transaction evaluation for id: {}, accountId: {}", dto.id(), dto.accountId());
+        log.info("Processing transaction evaluation for id: {}, accountId: {}",
+            dto.id(), LogMasking.mask(dto.accountId()));
         Timer.Sample sample = fraudMetrics.startEvaluation();
 
         // Taken before the duplicate check and the history read so that two concurrent evaluations

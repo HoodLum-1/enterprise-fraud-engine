@@ -34,7 +34,7 @@ The lock is acquired with a `lock_timeout` (default `PT2S`, `fraud.engine.lock.t
 
 The evaluation runs at `READ COMMITTED`, pinned on the `@Transactional` annotation, because lock-then-read is only correct under that isolation level. Advisory locks are PostgreSQL-only, so the lock sits behind the `AccountLock` interface and the H2-backed unit tests use a no-op implementation (`fraud.engine.lock.enabled=false`). The decision is recorded in [ADR 0001](adr/0001-per-account-advisory-locking.md).
 
-Rules are independent `FraudRule` components, ordered by Spring `@Order`. Each triggered rule contributes its configured risk points; `FraudEngine` derives overall severity from the combined score. Configuration and enabled flags are in `FraudEngineProperties` and `application.yml`.
+Rules are independent `FraudRule` components, ordered by Spring `@Order`. Each triggered rule contributes its configured risk points; `FraudEngine` derives overall severity from the combined score. Configuration and enabled flags are in `FraudEngineProperties` and `application.yml`. Overall severity is derived in one place, `SeverityAssessment`, which the engine calls when it writes a transaction and `TransactionQueryService` calls when one is read back. Deriving it twice, in two implementations, allowed the same transaction to be frozen at one severity and read back at another. `Severity` carries an explicit rank, and comparisons such as the freeze policy use that rank rather than `Enum#ordinal()`, so reordering the constants cannot silently change which accounts are frozen.
 
 | Rule | Inputs and window | Default condition | Default score / severity |
 |---|---|---|---|
@@ -74,6 +74,8 @@ JWT resource-server security is enabled by default. `SecurityConfig` is stateles
 | Health, Swagger UI, OpenAPI | Public; other endpoints require authentication |
 
 Alert queries accept optional `severity`, `ruleName`, `from`, and `to` filters. Alerts and case lists use Spring Data pagination with a default page size of 20 and maximum size of 100. Transaction lookup returns transaction details and its alerts. API errors are normalized to RFC 7807 `ProblemDetail`; rate limiting returns `429` with `Retry-After`, while circuit-breaker or evaluation unavailability returns `503` with `Retry-After`. Duplicate transaction IDs return `409`.
+
+An account holder sees the severity and the timing of an alert but not `ruleName`, `riskScore` or the parent `totalRiskScore`, which describe the model's own thresholds and weighting rather than anything the customer can act on. Analysts see them in full. A caller who is not the account holder receives `404` for a transaction that belongs to someone else, with the same body a missing transaction returns, so the endpoint cannot be used to discover which transactions exist; `FRAUD_VIEWER` was removed from the alert roles because `FRAUD_ANALYST` is the only role that reads every account, and a second read-all role that `AccountAccessPolicy` would never honour was dead configuration.
 
 ## Resilience and operational boundaries
 

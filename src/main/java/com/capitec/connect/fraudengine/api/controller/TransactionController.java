@@ -4,9 +4,11 @@ import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.dto.response.EvaluationSummaryResponseDto;
 import com.capitec.connect.fraudengine.api.dto.response.FraudAlertResponseDto;
 import com.capitec.connect.fraudengine.api.dto.response.TransactionDetailsResponseDto;
+import com.capitec.connect.fraudengine.api.exception.TransactionNotFoundException;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.engine.service.HttpEvaluationService;
 import com.capitec.connect.fraudengine.engine.service.TransactionQueryService;
+import com.capitec.connect.fraudengine.infrastructure.security.AlertVisibility;
 import com.capitec.connect.fraudengine.infrastructure.security.AccountAccessPolicy;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
 import jakarta.validation.Valid;
@@ -35,6 +37,7 @@ public class TransactionController {
     private final FraudAlertMapper fraudAlertMapper;
     private final TransactionQueryService transactionQueryService;
     private final AccountAccessPolicy accountAccessPolicy;
+    private final AlertVisibility alertVisibility;
 
     @PostMapping("/evaluate")
     public ResponseEntity<EvaluationSummaryResponseDto> evaluateTransaction(
@@ -52,8 +55,12 @@ public class TransactionController {
             @PathVariable UUID transactionId,
             Authentication authentication) {
         TransactionDetailsResponseDto details = transactionQueryService.getDetails(transactionId);
-        accountAccessPolicy.verifyAccess(details.accountId(), authentication);
-        return ResponseEntity.ok(details);
+        // A caller who may not read the account gets the same 404, with the same body, as a
+        // transaction that does not exist. A 403 here would confirm the transaction exists and
+        // merely belongs to somebody else.
+        accountAccessPolicy.verifyAccess(details.accountId(), authentication,
+            () -> new TransactionNotFoundException(transactionId));
+        return ResponseEntity.ok(alertVisibility.visibleTo(details, authentication));
     }
 
     private EvaluationSummaryResponseDto toResponseDto(EvaluationSummary summary) {

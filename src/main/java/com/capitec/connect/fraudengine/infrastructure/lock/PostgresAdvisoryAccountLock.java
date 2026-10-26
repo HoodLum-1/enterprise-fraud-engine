@@ -3,6 +3,7 @@ package com.capitec.connect.fraudengine.infrastructure.lock;
 import com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException;
 import com.capitec.connect.fraudengine.engine.service.AccountLock;
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
+import com.capitec.connect.fraudengine.infrastructure.logging.LogMasking;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -62,7 +63,7 @@ public class PostgresAdvisoryAccountLock implements AccountLock {
             if (isLockTimeout(ex)) {
                 sample.stop(lockWaitTimer("timeout"));
                 log.warn("Timed out after {} waiting for the evaluation lock on account {}",
-                        timeout, accountId);
+                        timeout, LogMasking.mask(accountId));
                 throw new AccountLockTimeoutException(accountId, ex);
             }
             sample.stop(lockWaitTimer("error"));

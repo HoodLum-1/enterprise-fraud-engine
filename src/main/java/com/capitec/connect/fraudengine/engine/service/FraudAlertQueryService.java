@@ -2,6 +2,7 @@ package com.capitec.connect.fraudengine.engine.service;
 
 import com.capitec.connect.fraudengine.api.dto.response.FraudAlertResponseDto;
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudAlertEntity;
+import com.capitec.connect.fraudengine.infrastructure.logging.LogMasking;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
 import com.capitec.connect.fraudengine.infrastructure.repository.FraudAlertRepository;
 import com.capitec.connect.fraudengine.domain.model.Severity;
@@ -26,7 +27,7 @@ public class FraudAlertQueryService {
 
     public Page<FraudAlertResponseDto> getAlertsByAccountId(
             String accountId, Severity severity, String ruleName, Instant from, Instant to, Pageable pageable) {
-        log.info("Querying fraud alerts for account: {}", accountId);
+        log.info("Querying fraud alerts for account: {}", LogMasking.mask(accountId));
         Specification<FraudAlertEntity> criteria = (root, query, builder) ->
             builder.equal(root.get("accountId"), accountId);
         if (severity != null) {

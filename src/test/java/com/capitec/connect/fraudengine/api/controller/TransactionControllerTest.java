@@ -3,6 +3,7 @@ package com.capitec.connect.fraudengine.api.controller;
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.dto.response.TransactionDetailsResponseDto;
 import com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException;
+import com.capitec.connect.fraudengine.api.exception.TransactionNotFoundException;
 import com.capitec.connect.fraudengine.api.exception.GlobalExceptionHandler;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.domain.model.FraudAlert;
@@ -10,6 +11,7 @@ import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.engine.service.HttpEvaluationService;
 import com.capitec.connect.fraudengine.engine.service.TransactionQueryService;
+import com.capitec.connect.fraudengine.infrastructure.security.AlertVisibility;
 import com.capitec.connect.fraudengine.infrastructure.security.AccountAccessPolicy;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
 import com.capitec.connect.fraudengine.util.FraudTestDataFactory;
@@ -23,15 +25,22 @@ import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -49,8 +58,11 @@ class TransactionControllerTest {
     @Mock
     private TransactionQueryService transactionQueryService;
 
-    @Mock
-    private AccountAccessPolicy accountAccessPolicy;
+    @Spy
+    private AccountAccessPolicy accountAccessPolicy = new AccountAccessPolicy();
+
+    @Spy
+    private AlertVisibility alertVisibility = new AlertVisibility();
 
     @InjectMocks
     private TransactionController transactionController;
@@ -149,5 +161,114 @@ class TransactionControllerTest {
             .andExpect(jsonPath("$.title").value("Bad Request"))
             .andExpect(jsonPath("$.status").value(400))
             .andExpect(jsonPath("$.invalidParams").exists());
+    }
+
+    @Test
+    void analystSeesTheRuleNamesAndScoresTheAccountHolderDoesNot() throws Exception {
+        UUID txId = UUID.randomUUID();
+        TransactionDetailsResponseDto details = detailsWithAlert(txId, "ACC-1001");
+        when(transactionQueryService.getDetails(txId)).thenReturn(details);
+
+        mockMvc.perform(get("/api/v1/transactions/" + txId)
+                .with(authenticatedAs("SOMEONE-ELSE", "ROLE_FRAUD_ANALYST")))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.totalRiskScore").value(40))
+            .andExpect(jsonPath("$.alerts[0].ruleName").value("HighAmountRule"))
+            .andExpect(jsonPath("$.alerts[0].riskScore").value(40))
+            .andExpect(jsonPath("$.alerts[0].severity").value("HIGH"));
+    }
+
+    @Test
+    void accountHolderSeesSeverityButNeitherTheRuleNorItsScore() throws Exception {
+        UUID txId = UUID.randomUUID();
+        TransactionDetailsResponseDto details = detailsWithAlert(txId, "ACC-1001");
+        when(transactionQueryService.getDetails(txId)).thenReturn(details);
+
+        mockMvc.perform(get("/api/v1/transactions/" + txId)
+                .with(authenticatedAs("ACC-1001", "ROLE_ACCOUNT_HOLDER")))
+            .andExpect(status().isOk())
+            // The parent total would give the redacted per-alert scores away.
+            .andExpect(jsonPath("$.totalRiskScore").doesNotExist())
+            .andExpect(jsonPath("$.alerts[0].ruleName").doesNotExist())
+            .andExpect(jsonPath("$.alerts[0].riskScore").doesNotExist())
+            // What the customer can act on stays.
+            .andExpect(jsonPath("$.alerts[0].severity").value("HIGH"))
+            .andExpect(jsonPath("$.alerts[0].reason").isNotEmpty())
+            .andExpect(jsonPath("$.overallSeverity").value("HIGH"));
+    }
+
+    @Test
+    void anotherAccountsTransactionIsReportedAsNotFoundNotForbidden() throws Exception {
+        UUID txId = UUID.randomUUID();
+        TransactionDetailsResponseDto details = detailsWithAlert(txId, "SOMEONE-ELSE");
+        when(transactionQueryService.getDetails(txId)).thenReturn(details);
+
+        mockMvc.perform(get("/api/v1/transactions/" + txId)
+                .with(authenticatedAs("ACC-1001", "ROLE_ACCOUNT_HOLDER")))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.title").value("Not Found"))
+            .andExpect(jsonPath("$.status").value(404));
+    }
+
+    @Test
+    void notYoursAndDoesNotExistAreIndistinguishable() throws Exception {
+        UUID ownedBySomeoneElse = UUID.randomUUID();
+        UUID doesNotExist = UUID.randomUUID();
+        TransactionDetailsResponseDto someoneElses = detailsWithAlert(ownedBySomeoneElse, "SOMEONE-ELSE");
+        when(transactionQueryService.getDetails(ownedBySomeoneElse)).thenReturn(someoneElses);
+        when(transactionQueryService.getDetails(doesNotExist)).thenThrow(
+            new TransactionNotFoundException(doesNotExist));
+
+        // A 403 here would confirm the transaction exists and merely belongs to somebody else,
+        // which is the whole difference an attacker needs to enumerate transaction ids.
+        var notYours = mockMvc.perform(get("/api/v1/transactions/" + ownedBySomeoneElse)
+                .with(authenticatedAs("ACC-1001", "ROLE_ACCOUNT_HOLDER")))
+            .andExpect(status().isNotFound())
+            .andReturn().getResponse().getContentAsString();
+
+        var missing = mockMvc.perform(get("/api/v1/transactions/" + doesNotExist)
+                .with(authenticatedAs("ACC-1001", "ROLE_ACCOUNT_HOLDER")))
+            .andExpect(status().isNotFound())
+            .andReturn().getResponse().getContentAsString();
+
+        // Everything that could distinguish the two, minus the timestamp, which is the instant the
+        // request was served and so legitimately differs between two calls.
+        String notYoursBody = withoutTimestamp(notYours).replace(ownedBySomeoneElse.toString(), "<id>");
+        String missingBody = withoutTimestamp(missing).replace(doesNotExist.toString(), "<id>");
+        assertEquals(missingBody, notYoursBody,
+            "a caller must not be able to tell a transaction they may not read from one that does not exist");
+    }
+
+    private String withoutTimestamp(String problemJson) {
+        return problemJson.replaceAll("\"timestamp\":[0-9.]+", "\"timestamp\":\"<ignored>\"");
+    }
+
+    /**
+     * Standalone MockMvc has no security filter chain, so nothing bridges the security context to
+     * {@code request.getUserPrincipal()}, which is where the controller's {@code Authentication}
+     * parameter is read from. Setting the principal directly is what that bridge would do.
+     */
+    private RequestPostProcessor authenticatedAs(String accountId, String role) {
+        Jwt jwt = Jwt.withTokenValue("token").header("alg", "none")
+            .claim("account_id", accountId).build();
+        JwtAuthenticationToken authentication = new JwtAuthenticationToken(
+            jwt, List.of(new SimpleGrantedAuthority(role)));
+        return request -> {
+            request.setUserPrincipal(authentication);
+            return request;
+        };
+    }
+
+    private TransactionDetailsResponseDto detailsWithAlert(UUID txId, String accountId) {
+        FraudAlert alert = FraudTestDataFactory.fraudAlert()
+            .transactionId(txId)
+            .accountId(accountId)
+            .riskScore(40)
+            .severity(Severity.HIGH)
+            .reason("Amount 60000.00 exceeds HIGH threshold of 50000.00")
+            .build();
+        return new TransactionDetailsResponseDto(txId, accountId, new BigDecimal("60000.00"),
+            "ZAR", "GROCERIES", "Market", "Cape Town", Instant.now(), true, 40,
+            Severity.HIGH, List.of(fraudAlertMapper.toResponseDto(alert)));
     }
 }

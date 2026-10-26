@@ -41,7 +41,7 @@ class SecurityAuthorizationTest {
     void fraudCases_withAuthenticatedNonAnalyst_returnsProblem403() throws Exception {
         mockMvc.perform(get("/api/v1/fraud-cases")
                 .with(SecurityMockMvcRequestPostProcessors.jwt()
-                    .authorities(() -> "ROLE_FRAUD_VIEWER")))
+                    .authorities(() -> "ROLE_ACCOUNT_HOLDER")))
             .andExpect(status().isForbidden())
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
             .andExpect(jsonPath("$.title").value("Forbidden"))
@@ -104,11 +104,13 @@ class SecurityAuthorizationTest {
             .andExpect(jsonPath("$.page.totalElements").value(0))
             .andExpect(jsonPath("$.size").doesNotExist());
 
+        // A caller who may not read the account gets the same 404 a missing account would get,
+        // so the endpoint cannot be used to find out which accounts exist.
         mockMvc.perform(get("/api/v1/fraud-alerts/account/ACC-1001")
                 .with(SecurityMockMvcRequestPostProcessors.jwt()
                     .jwt(jwt -> jwt.claim("account_id", "ACC-OTHER"))
                     .authorities(() -> "ROLE_ACCOUNT_HOLDER")))
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.status").value(403));
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.status").value(404));
     }
 }

@@ -397,8 +397,15 @@ components:
             timestamp:
               type: string
               format: date-time
+            totalRiskScore:
+              # Overrides the required integer in EvaluationSummary: account holders are not given
+              # the per-alert scores, so the parent total would give them away.
+              type: integer
+              nullable: true
     FraudAlert:
       type: object
+      # ruleName and riskScore are omitted for account holders and present for analysts, so both
+      # are nullable. The rest is the same object for every caller.
       properties:
         id:
           type: string
@@ -410,8 +417,10 @@ components:
           type: string
         ruleName:
           type: string
+          nullable: true
         riskScore:
           type: integer
+          nullable: true
         severity:
           $ref: '#/components/schemas/Severity'
         reason:

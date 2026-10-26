@@ -4,6 +4,7 @@ import com.capitec.connect.fraudengine.api.dto.response.FraudAlertResponseDto;
 import com.capitec.connect.fraudengine.api.dto.response.TransactionDetailsResponseDto;
 import com.capitec.connect.fraudengine.api.exception.TransactionNotFoundException;
 import com.capitec.connect.fraudengine.domain.model.Severity;
+import com.capitec.connect.fraudengine.domain.model.SeverityAssessment;
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudAlertEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.TransactionEntity;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudAlertMapper;
@@ -34,24 +35,14 @@ public class TransactionQueryService {
             .map(fraudAlertMapper::toResponseDto)
             .toList();
         int riskScore = alerts.stream().mapToInt(FraudAlertResponseDto::riskScore).sum();
-        Severity severity = determineSeverity(riskScore, alerts);
+        // The same assessment the engine used at evaluation time, so reading a transaction back
+        // cannot report a different severity than the one that decided the response.
+        Severity severity = SeverityAssessment.assess(riskScore,
+            alerts.stream().map(FraudAlertResponseDto::severity).toList());
         return new TransactionDetailsResponseDto(
             entity.getId(), entity.getAccountId(), entity.getAmount(), entity.getCurrency(),
             entity.getCategory(), entity.getMerchantName(), entity.getLocation(), entity.getTimestamp(),
             !alerts.isEmpty(), riskScore, severity, alerts
         );
-    }
-
-    private Severity determineSeverity(int riskScore, List<FraudAlertResponseDto> alerts) {
-        if (alerts.stream().anyMatch(alert -> alert.severity() == Severity.CRITICAL) || riskScore >= 80) {
-            return Severity.CRITICAL;
-        }
-        if (alerts.stream().anyMatch(alert -> alert.severity() == Severity.HIGH) || riskScore >= 50) {
-            return Severity.HIGH;
-        }
-        if (alerts.stream().anyMatch(alert -> alert.severity() == Severity.MEDIUM) || riskScore >= 25) {
-            return Severity.MEDIUM;
-        }
-        return Severity.LOW;
     }
 }

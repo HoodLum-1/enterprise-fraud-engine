@@ -7,6 +7,7 @@ import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperti
 import com.capitec.connect.fraudengine.infrastructure.entity.EvaluationOutboxEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.FraudCaseEntity;
 import com.capitec.connect.fraudengine.infrastructure.entity.FreezeAuditEntity;
+import com.capitec.connect.fraudengine.infrastructure.logging.LogMasking;
 import com.capitec.connect.fraudengine.infrastructure.mapper.FraudCaseMapper;
 import com.capitec.connect.fraudengine.infrastructure.metrics.FraudMetrics;
 import com.capitec.connect.fraudengine.infrastructure.repository.EvaluationOutboxRepository;
@@ -55,7 +56,7 @@ public class FraudAlertConsumer {
         }
 
         log.info("Consumed fraud alert event for transaction {} from account {}",
-                event.getTransactionId(), event.getAccountId());
+                event.getTransactionId(), LogMasking.mask(event.getAccountId()));
 
         boolean isFraudulent = event.isFraudulent() || event.getAlertsGenerated() > 0
             || (event.getTriggeredRules() != null && event.getTriggeredRules().stream()
@@ -85,13 +86,13 @@ public class FraudAlertConsumer {
         boolean freezeEligible = policy.isEnabled()
             && (event.getTotalRiskScore() >= policy.getMinimumRiskScore()
                 || (event.getOverallSeverity() != null
-                    && event.getOverallSeverity().ordinal() >= policy.getMinimumSeverity().ordinal()));
+                    && event.getOverallSeverity().isAtLeast(policy.getMinimumSeverity())));
         fraudMetrics.recordFreezeDecision(freezeEligible);
 
         if (freezeEligible && !freezeAuditRepository.existsByTransactionId(event.getTransactionId())) {
             log.warn("AUTOMATED MITIGATION: Transaction {} from account {} is CRITICAL/HIGH risk "
                             + "(severity={}, riskScore={}) - initiating account freeze",
-                    event.getTransactionId(), event.getAccountId(),
+                    event.getTransactionId(), LogMasking.mask(event.getAccountId()),
                     event.getOverallSeverity(), event.getTotalRiskScore());
 
             UUID eventId = event.getEventId() != null ? event.getEventId() : event.getTransactionId();
@@ -133,6 +134,6 @@ public class FraudAlertConsumer {
         // --- 3. Customer Notification Mock ---
         log.info("MOCK NOTIFICATION: Cardholder alert triggered asynchronously for transaction {} from account {} - "
                         + "Your transaction has been flagged for security review. Reference ID: {}",
-                event.getTransactionId(), event.getAccountId(), event.getTransactionId());
+                event.getTransactionId(), LogMasking.mask(event.getAccountId()), event.getTransactionId());
     }
 }
