@@ -64,12 +64,14 @@ jobs:
           KC_HOSTNAME: http://localhost:8180
           KC_HEALTH_ENABLED: "true"
         options: >-
-          --entrypoint "/opt/keycloak/bin/kc.sh"
           --health-cmd "curl --fail http://localhost:8080/health/ready || exit 1"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 20
-          start-dev --import-realm
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        arguments: start-dev --import-realm
 
     steps:
       - name: Check out source
