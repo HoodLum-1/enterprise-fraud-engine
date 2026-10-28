@@ -39,11 +39,6 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/fraud-cases", "/api/v1/fraud-cases/**").hasRole("FRAUD_ANALYST")
                 .requestMatchers(HttpMethod.POST, "/api/v1/transactions/evaluate")
                     .hasAnyRole("TRANSACTION_INGESTOR", "FRAUD_ANALYST")
-                // FRAUD_VIEWER used to sit in this list. Nothing reads every account except
-                // FRAUD_ANALYST, so a viewer was a role with a permission that could never be
-                // granted: AccountAccessPolicy would still have refused anything but its own
-                // account. Removing it keeps one read-all role instead of two, one of which is
-                // dead.
                 .requestMatchers("/api/v1/fraud-alerts/**")
                     .hasAnyRole("FRAUD_ANALYST", "ACCOUNT_HOLDER")
                 .anyRequest().authenticated()

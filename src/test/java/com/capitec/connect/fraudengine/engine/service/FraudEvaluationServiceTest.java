@@ -109,8 +109,6 @@ class FraudEvaluationServiceTest {
 
         EvaluationOutcome outcome = fraudEvaluationService.evaluate(requestDto);
 
-        // The whole point of a retry: the caller is told what already happened, not asked to
-        // interpret a conflict for a request it believes it never got an answer to.
         assertFalse(outcome.created(), "a retry must not be reported as a new transaction");
         assertEquals(txId, outcome.summary().transactionId());
         assertEquals("ACC-1001", outcome.summary().accountId());
@@ -148,8 +146,6 @@ class FraudEvaluationServiceTest {
         stored.setAmount(new BigDecimal("1.00"));
         when(transactionRepository.findById(txId)).thenReturn(Optional.of(stored));
 
-        // Accepting this would silently replace a stored transaction and orphan every alert that
-        // was evaluated from it, so the id can only ever hold the one transaction.
         assertThrows(DuplicateTransactionException.class, () -> fraudEvaluationService.evaluate(requestDto));
 
         verify(transactionRepository, never()).save(any());
@@ -182,7 +178,7 @@ class FraudEvaluationServiceTest {
         assertFalse(outcome.created(), "the loser of the race is still a replay");
         assertEquals(40, outcome.summary().totalRiskScore());
         assertEquals(Severity.HIGH, outcome.summary().overallSeverity());
-        // Nothing that only happens once the row is genuinely ours may have run.
+
         verify(evaluationOutboxService, never()).enqueueEvaluation(any(), any());
         verify(fraudAlertRepository, never()).saveAll(any());
         assertEquals(1.0, rejections("duplicate"));
@@ -204,8 +200,6 @@ class FraudEvaluationServiceTest {
 
     @Test
     void aConstraintFailureThatIsNotADuplicateIsNotInventedIntoOne() {
-        // Nothing to read back, so the write failed for some other reason. Claiming a duplicate
-        // here would hide the real cause behind a message about the transaction id.
         when(transactionRepository.findById(txId)).thenReturn(Optional.empty());
 
         DataIntegrityViolationException original =
@@ -423,11 +417,6 @@ class FraudEvaluationServiceTest {
         verifyNoInteractions(evaluationOutboxService);
     }
 
-    /**
-     * The account lock serialises concurrent evaluations of one account, and lock-then-read is
-     * only correct under READ COMMITTED. This guards the isolation level against a later change
-     * to REPEATABLE READ or SERIALIZABLE.
-     */
     @Test
     void evaluationIsPinnedToReadCommittedIsolation() throws Exception {
         Transactional transactional = FraudEvaluationService.class

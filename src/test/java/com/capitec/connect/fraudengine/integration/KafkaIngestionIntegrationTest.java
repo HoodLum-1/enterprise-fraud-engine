@@ -41,12 +41,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/**
- * Covers how ingestion treats poison messages and how the HTTP quota relates to the Kafka path.
- *
- * <p>Both matter in production: a single unparseable record must not stop the partition, and a
- * backlog on the topic must never be able to answer a paying HTTP client with 429.
- */
 @Testcontainers
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -74,8 +68,6 @@ class KafkaIngestionIntegrationTest {
     @ServiceConnection
     static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.5.0"));
 
-    // Explicit as well as @ServiceConnection, matching FraudEngineIntegrationTest: the raw
-    // producer and the dead letter reader below are built from the container address directly.
     @DynamicPropertySource
     static void registerDynamicProperties(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.bootstrap-servers", kafka::getBootstrapServers);
@@ -100,8 +92,6 @@ class KafkaIngestionIntegrationTest {
 
         String deadLettered = awaitDeadLetter(poisonKey);
         assertNotNull(deadLettered, "a malformed payload must be dead lettered instead of retried");
-        // The recoverer republishes through the application template, which uses a JsonSerializer,
-        // so the payload comes back as a JSON string literal rather than raw bytes.
         assertTrue(deadLettered.contains("this is not json"),
             "the dead letter must keep the original payload, was: " + deadLettered);
 
@@ -109,7 +99,6 @@ class KafkaIngestionIntegrationTest {
             .cleanTransaction("ACC-AFTER-POISON-" + UUID.randomUUID()).build();
         kafkaTemplate.send(TRANSACTION_TOPIC, valid.accountId(), valid);
 
-        // The listener survived the poison record and keeps consuming the partition.
         await(() -> transactionRepository.existsById(valid.id()));
     }
 
@@ -120,8 +109,6 @@ class KafkaIngestionIntegrationTest {
         kafkaTemplate.send(TRANSACTION_TOPIC, viaKafka.accountId(), viaKafka);
         await(() -> transactionRepository.existsById(viaKafka.id()));
 
-        // The quota allows one HTTP evaluation per second. Kafka has not spent any of it, so the
-        // first call still succeeds and only the second one is rejected.
         TransactionRequestDto firstHttp = IntegrationTestDataFactory
             .cleanTransaction("ACC-HTTP-QUOTA-1-" + UUID.randomUUID()).build();
         TransactionRequestDto secondHttp = IntegrationTestDataFactory
@@ -141,7 +128,6 @@ class KafkaIngestionIntegrationTest {
             "the Kafka evaluation must have been persisted, not rejected by the HTTP quota");
     }
 
-    /** Sends the payload as raw text, so a body that is not JSON stays not JSON on the wire. */
     private void sendRaw(String topic, String key, String payload) throws Exception {
         Properties properties = new Properties();
         properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());
@@ -154,10 +140,6 @@ class KafkaIngestionIntegrationTest {
         }
     }
 
-    /**
-     * Reads the dead letter queue directly from the container, so this assertion does not depend
-     * on the application's own producer or on how the Spring context binds bootstrap servers.
-     */
     private String awaitDeadLetter(String key) {
         Properties properties = new Properties();
         properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers());

@@ -19,15 +19,12 @@ class LogMaskingTest {
 
     @Test
     void enoughOfTheEndsSurvivesToCorrelateTwoLines() {
-        // An operator reading a stack of lines still has to be able to tell that two of them are
-        // about the same account, or the log stops being useful for the thing it is for.
         assertEquals(LogMasking.mask("ACC-999888777"), LogMasking.mask("ACC-999888777"));
         assertFalse(LogMasking.mask("ACC-999888777").equals(LogMasking.mask("ACC-999888778")));
     }
 
     @Test
     void aShortValueIsReplacedRatherThanPartlyShown() {
-        // Below the length where a prefix and suffix would leave anything worth reading.
         assertEquals("***", LogMasking.mask("abc"));
         assertEquals("*", LogMasking.mask("a"));
     }

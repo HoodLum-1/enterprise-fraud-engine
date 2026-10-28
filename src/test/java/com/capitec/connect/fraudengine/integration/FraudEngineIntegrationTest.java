@@ -187,9 +187,6 @@ class FraudEngineIntegrationTest {
                 .content(objectMapper.writeValueAsString(request)))
             .andExpect(status().isCreated());
 
-        // The id is already held by a different transaction, so accepting this one would replace
-        // it and orphan the alerts evaluated from it. A retry that describes the same transaction
-        // is a replay rather than a conflict; see TransactionIdempotencyIntegrationTest.
         TransactionRequestDto conflicting = IntegrationTestDataFactory.duplicateTransaction(fixedId)
             .accountId("ACC-INT-003")
             .amount(new BigDecimal("12345.67"))

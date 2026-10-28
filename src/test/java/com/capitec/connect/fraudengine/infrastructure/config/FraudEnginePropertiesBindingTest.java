@@ -23,11 +23,6 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Binds the real {@code src/main/resources/application.yml}, not the test copy that shadows it on
- * the test classpath, so a misplaced key under {@code fraud.engine} fails the same way it would
- * fail at service startup.
- */
 class FraudEnginePropertiesBindingTest {
 
     private static final String MAIN_APPLICATION_YAML = "src/main/resources/application.yml";
@@ -137,10 +132,6 @@ class FraudEnginePropertiesBindingTest {
             });
     }
 
-    /**
-     * Flattens the main YAML into {@code key=value} pairs. The test classpath deliberately shadows
-     * {@code application.yml}, so it has to be read from the source tree.
-     */
     private Map<String, String> mainApplicationYamlValues() {
         List<PropertySource<?>> sources;
         try {

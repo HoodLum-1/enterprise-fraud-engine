@@ -26,13 +26,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/**
- * A record that will fail identically on every redelivery has to go straight to the dead letter
- * queue, while a record that failed for a reason outside the message has to be retried with
- * backoff. Getting it backwards is expensive both ways: poison burns the retry backoff and
- * floods the log, and a transient failure gets parked in the DLQ where a redelivery would have
- * succeeded.
- */
 class KafkaConsumerConfigTest {
 
     private static final String TRANSACTION_TOPIC = "transactions-topic";
@@ -56,8 +49,6 @@ class KafkaConsumerConfigTest {
 
     @Test
     void genericIllegalArgumentIsNotTreatedAsPoison() {
-        // Too broad to prove a message is permanently unprocessable. Classifying it would park
-        // unrelated bugs in the dead letter queue without ever retrying them.
         assertNull(classification(IllegalArgumentException.class));
     }
 
@@ -102,11 +93,6 @@ class KafkaConsumerConfigTest {
         return container;
     }
 
-    /**
-     * {@link DefaultErrorHandler} exposes no public accessor for its classification map, so the
-     * decision is read back with the public {@code removeClassification} probe: it returns the
-     * value the handler currently holds, or {@code null} when the exception stays retryable.
-     */
     private Boolean classification(Class<? extends Exception> exceptionType) {
         return errorHandler.removeClassification(exceptionType);
     }

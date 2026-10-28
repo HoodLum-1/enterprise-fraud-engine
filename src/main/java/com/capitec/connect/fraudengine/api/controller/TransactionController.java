@@ -47,10 +47,6 @@ public class TransactionController {
 
         EvaluationOutcome outcome = httpEvaluationService.evaluate(requestDto);
         EvaluationSummaryResponseDto responseDto = toResponseDto(outcome.summary());
-
-        // 201 when the transaction was stored, 200 when the request repeated an id that already
-        // holds this same transaction. The body is the same evaluation either way, so the status
-        // is the only thing that tells a caller whether its earlier attempt reached us.
         return ResponseEntity.status(outcome.created() ? HttpStatus.CREATED : HttpStatus.OK)
             .body(responseDto);
     }
@@ -60,9 +56,6 @@ public class TransactionController {
             @PathVariable UUID transactionId,
             Authentication authentication) {
         TransactionDetailsResponseDto details = transactionQueryService.getDetails(transactionId);
-        // A caller who may not read the account gets the same 404, with the same body, as a
-        // transaction that does not exist. A 403 here would confirm the transaction exists and
-        // merely belongs to somebody else.
         accountAccessPolicy.verifyAccess(details.accountId(), authentication,
             () -> new TransactionNotFoundException(transactionId));
         return ResponseEntity.ok(alertVisibility.visibleTo(details, authentication));

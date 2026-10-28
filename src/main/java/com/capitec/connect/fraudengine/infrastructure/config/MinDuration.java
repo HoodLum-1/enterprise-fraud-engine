@@ -9,13 +9,6 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-/**
- * Fails configuration binding when a duration setting is shorter than a given bound, so a typo such
- * as a zero or negative window cannot silently disable a rule at runtime.
- *
- * <p>Spring Boot's own {@code @DurationMin} is not on this project's classpath; this is the
- * smallest equivalent.
- */
 @Target({ElementType.FIELD, ElementType.PARAMETER, ElementType.TYPE_USE})
 @Retention(RetentionPolicy.RUNTIME)
 @Documented

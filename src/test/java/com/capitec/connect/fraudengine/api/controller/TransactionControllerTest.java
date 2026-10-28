@@ -152,8 +152,6 @@ class TransactionControllerTest {
             .andExpect(status().isOk())
             .andReturn().getResponse().getContentAsString();
 
-        // A client that never saw the 201 has to be able to recognise its own earlier success
-        // from the body alone, so the two answers must be the same evaluation.
         assertEquals(created, replayed,
             "a replay must return exactly what the first evaluation returned");
     }
@@ -227,7 +225,6 @@ class TransactionControllerTest {
         mockMvc.perform(get("/api/v1/transactions/" + txId)
                 .with(authenticatedAs("ACC-1001", "ROLE_ACCOUNT_HOLDER")))
             .andExpect(status().isOk())
-            // The parent total would give the redacted per-alert scores away.
             .andExpect(jsonPath("$.totalRiskScore").doesNotExist())
             .andExpect(jsonPath("$.alerts[0].ruleName").doesNotExist())
             .andExpect(jsonPath("$.alerts[0].riskScore").doesNotExist())
@@ -259,8 +256,6 @@ class TransactionControllerTest {
         when(transactionQueryService.getDetails(doesNotExist)).thenThrow(
             new TransactionNotFoundException(doesNotExist));
 
-        // A 403 here would confirm the transaction exists and merely belongs to somebody else,
-        // which is the whole difference an attacker needs to enumerate transaction ids.
         var notYours = mockMvc.perform(get("/api/v1/transactions/" + ownedBySomeoneElse)
                 .with(authenticatedAs("ACC-1001", "ROLE_ACCOUNT_HOLDER")))
             .andExpect(status().isNotFound())
@@ -271,8 +266,6 @@ class TransactionControllerTest {
             .andExpect(status().isNotFound())
             .andReturn().getResponse().getContentAsString();
 
-        // Everything that could distinguish the two, minus the timestamp, which is the instant the
-        // request was served and so legitimately differs between two calls.
         String notYoursBody = withoutTimestamp(notYours).replace(ownedBySomeoneElse.toString(), "<id>");
         String missingBody = withoutTimestamp(missing).replace(doesNotExist.toString(), "<id>");
         assertEquals(missingBody, notYoursBody,
@@ -283,11 +276,6 @@ class TransactionControllerTest {
         return problemJson.replaceAll("\"timestamp\":[0-9.]+", "\"timestamp\":\"<ignored>\"");
     }
 
-    /**
-     * Standalone MockMvc has no security filter chain, so nothing bridges the security context to
-     * {@code request.getUserPrincipal()}, which is where the controller's {@code Authentication}
-     * parameter is read from. Setting the principal directly is what that bridge would do.
-     */
     private RequestPostProcessor authenticatedAs(String accountId, String role) {
         Jwt jwt = Jwt.withTokenValue("token").header("alg", "none")
             .claim("account_id", accountId).build();

@@ -50,8 +50,6 @@ public class FraudAlertController {
         log.info("Fetching fraud alerts for account: {}", LogMasking.mask(accountId));
         Page<FraudAlertResponseDto> alerts = fraudAlertQueryService.getAlertsByAccountId(
             accountId, severity, ruleName, from, to, pageable);
-        // The rule name and the points it scored describe our own model, so account holders get
-        // the severity and the wording they can act on and nothing else.
         return ResponseEntity.ok(alerts.map(alert -> alertVisibility.visibleTo(alert, authentication)));
     }
 

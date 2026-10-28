@@ -57,16 +57,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-/**
- * The account id must not reach the log in full from any of the paths that name one.
- *
- * <p>Masking is easy to apply at one call site and to forget at the next, so this drives the real
- * code behind each of the four that log an account id and captures what the log actually receives.
- * Asserting on {@link LogMasking} alone would not catch a site that never called it.
- */
 class AccountIdLogMaskingTest {
 
-    /** The account id every case uses, chosen so a prefix-and-suffix mask cannot contain it. */
     private static final String ACCOUNT_ID = "ACC-999911112222";
 
     private static final String MASKED = LogMasking.mask(ACCOUNT_ID);
@@ -88,7 +80,6 @@ class AccountIdLogMaskingTest {
         when(transactionRepository.findById(any())).thenReturn(Optional.empty());
         when(transactionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(fraudAlertRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        // A rule-free evaluation is enough: the line under test is the one naming the account.
         when(engine.evaluate(any(), any())).thenReturn(new EvaluationSummary(
             UUID.randomUUID(), ACCOUNT_ID, 0, Severity.LOW, List.of(), List.of()));
 
@@ -158,10 +149,6 @@ class AccountIdLogMaskingTest {
         assertEquals(LogMasking.mask(ACCOUNT_ID), MASKED);
     }
 
-    /**
-     * Attaches a capture appender to the given class's logger, so the assertions read against what
-     * the code actually emitted rather than against a hand-checked string.
-     */
     private void attach(Class<?> type) {
         Logger logger = (Logger) LoggerFactory.getLogger(type);
         appender.start();

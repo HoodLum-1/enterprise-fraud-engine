@@ -99,9 +99,6 @@ class AccountLockIntegrationTest {
 
         requiresNew.executeWithoutResult(status -> {
             accountLock.lockForEvaluation(accountId);
-
-            // The outer transaction holds the lock; a second transaction for the same account must
-            // hit the configured lock_timeout rather than block indefinitely.
             AccountLockTimeoutException thrown = assertThrows(AccountLockTimeoutException.class,
                 () -> requiresNew.executeWithoutResult(inner -> accountLock.lockForEvaluation(accountId)));
 
@@ -131,9 +128,6 @@ class AccountLockIntegrationTest {
         fraudEvaluationService.evaluate(
             IntegrationTestDataFactory.velocityTransaction(accountId, baseTime, 10).build());
 
-        // The pair shares an event timestamp, so the second evaluation sees the first one regardless
-        // of which thread wins the advisory lock. Without the lock both could read the same two-row
-        // history and neither would trigger, which is the regression this test guards against.
         TransactionRequestDto first = IntegrationTestDataFactory
             .velocityTransaction(accountId, baseTime, 20).build();
         TransactionRequestDto second = IntegrationTestDataFactory

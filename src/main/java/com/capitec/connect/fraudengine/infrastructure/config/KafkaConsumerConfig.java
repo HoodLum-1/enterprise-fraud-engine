@@ -72,30 +72,6 @@ public class KafkaConsumerConfig {
         return factory;
     }
 
-    /**
-     * The retry policy separates poison messages from transient failures.
-     *
-     * <p>Non-retryable exceptions describe a record that will fail identically on every
-     * redelivery, so it is published straight to the dead letter queue:
-     *
-     * <ul>
-     *   <li>{@link SerializationException} - the record bytes cannot be deserialised.</li>
-     *   <li>{@link MalformedTransactionEventException} - the payload is not valid JSON.</li>
-     *   <li>{@link ConstraintViolationException} - the payload is valid JSON but not a valid
-     *       transaction (missing or out-of-range fields).</li>
-     *   <li>{@link UnsupportedCurrencyException} - no threshold exists for the currency, so the
-     *       evaluation cannot succeed on a redelivery either.</li>
-     * </ul>
-     *
-     * <p>Deliberately not in that list: {@code AccountLockTimeoutException}, which only means
-     * another evaluation of the same account holds the lock, so it is retried with backoff. And
-     * generic {@link IllegalArgumentException} is not classified either: it is too broad to prove
-     * a message is permanently unprocessable, and treating it as poison would silently park
-     * unrelated bugs in the dead letter queue.
-     *
-     * @param kafkaTemplate the template the recoverer publishes dead letters with
-     * @return the configured error handler
-     */
     @Bean
     public DefaultErrorHandler transactionErrorHandler(KafkaTemplate<String, Object> kafkaTemplate) {
         ExponentialBackOff backOff = new ExponentialBackOff(500L, 2.0);

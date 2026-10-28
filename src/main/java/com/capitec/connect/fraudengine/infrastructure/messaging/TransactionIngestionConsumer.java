@@ -33,8 +33,6 @@ public class TransactionIngestionConsumer {
         try {
             request = objectMapper.readValue(payload, TransactionRequestDto.class);
         } catch (JsonProcessingException ex) {
-            // Poison payload: a redelivery would fail the same way, so this is classified
-            // non-retryable in KafkaConsumerConfig and the record goes straight to the DLQ.
             throw new MalformedTransactionEventException("Invalid transaction event JSON", ex);
         }
 

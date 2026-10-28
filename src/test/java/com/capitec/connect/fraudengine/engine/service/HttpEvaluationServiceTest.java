@@ -31,12 +31,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-/**
- * Covers the HTTP facade that carries the {@code fraudEngine} rate limiter. Kafka ingestion calls
- * {@link FraudEvaluationService} directly, so a burst on the topic neither spends this quota nor
- * can be rejected by it. The annotation-driven rejection itself is covered end to end by
- * {@code RateLimitIntegrationTest}, which needs a Spring proxy for the aspect to apply.
- */
 @ExtendWith(MockitoExtension.class)
 class HttpEvaluationServiceTest {
 
@@ -77,9 +71,6 @@ class HttpEvaluationServiceTest {
 
     @Test
     void aReplayStaysAReplaySoTheCallerCanTellItFromAFreshEvaluation() {
-        // The facade is the last thing between the service and the status code. If it rebuilt the
-        // outcome, a retry would come back as 201 and the client would never learn that its
-        // earlier attempt had already succeeded.
         EvaluationSummary summary = FraudTestDataFactory.evaluationSummary(
             requestDto.id(), "ACC-1001", 0, Severity.LOW, List.of(), List.of());
         when(fraudEvaluationService.evaluate(requestDto))

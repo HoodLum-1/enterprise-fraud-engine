@@ -10,14 +10,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-/**
- * HTTP entry point for transaction evaluation.
- *
- * <p>The {@code fraudEngine} rate limiter protects the HTTP API and its quota, so it belongs here
- * and not on {@link FraudEvaluationService}. Kafka ingestion calls the evaluation service
- * directly: a backlog on the topic must never spend the HTTP quota, and a burst of Kafka traffic
- * must never make the HTTP API answer 429 for a client that still has quota left.
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -31,13 +23,6 @@ public class HttpEvaluationService {
         return fraudEvaluationService.evaluate(dto);
     }
 
-    /**
-     * Fail closed when the HTTP quota is spent, without touching the database.
-     *
-     * @param dto the transaction request that was rejected
-     * @param ex the rate limiter rejection
-     * @return never returns normally
-     */
     EvaluationOutcome rateLimited(TransactionRequestDto dto, RequestNotPermitted ex) {
         log.warn("Rate limit rejected transaction evaluation for {}", dto.id());
         fraudMetrics.recordRejection("rate_limit");

@@ -26,19 +26,6 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
 
-/**
- * The severity a caller is told when a transaction is evaluated has to be the same severity they
- * are told when they read that transaction back.
- *
- * <p>These two paths used to compute it separately, and the engine additionally short-circuited to
- * {@code LOW} for a zero cumulative score while the query path raised it again from the stored
- * alert severities. A transaction could be frozen on the strength of a {@code CRITICAL} evaluation
- * and then read back as {@code LOW} by the analyst looking at it.
- *
- * <p>So this drives a real {@link FraudEngine} over each combination that reaches a different
- * answer, then hands the alerts it produced to the real {@link TransactionQueryService} and
- * asserts the two agree.
- */
 @ExtendWith(MockitoExtension.class)
 class SeverityConsistencyTest {
 
@@ -70,8 +57,6 @@ class SeverityConsistencyTest {
         UUID transactionId = UUID.randomUUID();
         String accountId = "ACC-CONSISTENCY";
 
-        // The real engine, with one stub rule per result, so the alerts and the summary come out
-        // of the code path that actually writes them.
         EvaluationSummary evaluated = new FraudEngine(
             results.stream().map(StubRule::new).map(FraudRule.class::cast).toList())
             .evaluate(transaction(transactionId, accountId), List.of());
@@ -137,7 +122,6 @@ class SeverityConsistencyTest {
             : results.stream().map(r -> r.riskScore() + "pts/" + r.severity()).toList().toString();
     }
 
-    /** A rule that always reports one fixed result, so the case is the only variable. */
     private record StubRule(RuleEvaluationResult result) implements FraudRule {
 
         @Override

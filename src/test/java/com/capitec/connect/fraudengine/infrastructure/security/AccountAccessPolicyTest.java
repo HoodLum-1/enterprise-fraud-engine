@@ -16,13 +16,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/**
- * Who may read which account, and how a refusal is reported.
- *
- * <p>The reporting matters as much as the decision. A 403 tells a caller holding a valid token for
- * one account that the transaction they asked about exists and belongs to somebody else, which is
- * everything they need to enumerate transactions.
- */
 class AccountAccessPolicyTest {
 
     private final AccountAccessPolicy policy = new AccountAccessPolicy();
@@ -46,8 +39,6 @@ class AccountAccessPolicyTest {
 
     @Test
     void aRefusalIsTheSameAnswerAsAMissingResource() {
-        // The caller-supplied exception is what makes the two cases identical, so the test pins
-        // that it is the one actually thrown, not a look-alike.
         ResourceNotFoundException expected = new ResourceNotFoundException();
 
         ResourceNotFoundException thrown = assertThrows(ResourceNotFoundException.class,
@@ -79,8 +70,6 @@ class AccountAccessPolicyTest {
 
     @Test
     void anUnauthenticatedCallIsRefusedOutright() {
-        // No identity to compare against: this is not a resource the caller asked about, so a
-        // plain refusal is the honest answer rather than a not-found.
         assertThrows(AccessDeniedException.class,
             () -> policy.verifyAccess("ACC-1", null, ResourceNotFoundException::new));
     }

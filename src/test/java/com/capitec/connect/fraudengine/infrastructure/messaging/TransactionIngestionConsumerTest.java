@@ -26,11 +26,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
-/**
- * The consumer must tell poison messages apart from transient failures, because
- * {@code KafkaConsumerConfig} sends only the poison ones straight to the dead letter queue and
- * retries the rest with backoff.
- */
 @ExtendWith(MockitoExtension.class)
 class TransactionIngestionConsumerTest {
 
@@ -91,8 +86,6 @@ class TransactionIngestionConsumerTest {
         AccountLockTimeoutException thrown = assertThrows(
             AccountLockTimeoutException.class, () -> consumer.consume(asJson(request)));
 
-        // The error handler classifies on the concrete type, so wrapping it would silently
-        // turn a retry-later condition into an immediate dead letter.
         assertSame(timeout, thrown);
     }
 

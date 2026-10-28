@@ -14,14 +14,6 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Map;
 
-/**
- * Service settings.
- *
- * <p>Unknown keys are rejected on purpose: a typo in {@code application.yml} must stop the service
- * at startup instead of silently falling back to a default and changing the rule behaviour in
- * production. The nested settings are validated with JSR-303 for the values that must be positive
- * or non-negative.
- */
 @Data
 @Configuration
 @Validated

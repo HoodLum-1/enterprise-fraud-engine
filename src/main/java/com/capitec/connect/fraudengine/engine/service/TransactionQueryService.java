@@ -35,8 +35,7 @@ public class TransactionQueryService {
             .map(fraudAlertMapper::toResponseDto)
             .toList();
         int riskScore = alerts.stream().mapToInt(FraudAlertResponseDto::riskScore).sum();
-        // The same assessment the engine used at evaluation time, so reading a transaction back
-        // cannot report a different severity than the one that decided the response.
+
         Severity severity = SeverityAssessment.assess(riskScore,
             alerts.stream().map(FraudAlertResponseDto::severity).toList());
         return new TransactionDetailsResponseDto(

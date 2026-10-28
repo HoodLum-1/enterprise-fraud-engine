@@ -29,8 +29,6 @@ class SeverityAssessmentTest {
         assertTrue(Severity.CRITICAL.isAtLeast(Severity.LOW));
         assertTrue(Severity.HIGH.isAtLeast(Severity.HIGH));
         assertFalse(Severity.LOW.isAtLeast(Severity.MEDIUM));
-        // A null minimum means no minimum is configured, so nothing qualifies on severity alone.
-        // The alternative would freeze accounts because a property was left out.
         assertFalse(Severity.LOW.isAtLeast(null));
         assertFalse(Severity.CRITICAL.isAtLeast(null));
     }
@@ -51,8 +49,6 @@ class SeverityAssessmentTest {
 
     @Test
     void theHighestFindingWinsEvenWhenTheScoreIsStillLow() {
-        // A rule worth no points but a CRITICAL severity still has to come back CRITICAL. This is
-        // the case the engine's old "score of zero means LOW" shortcut got wrong.
         assertEquals(Severity.CRITICAL,
             SeverityAssessment.assess(0, List.of(Severity.CRITICAL)));
         assertEquals(Severity.HIGH,
@@ -77,8 +73,6 @@ class SeverityAssessmentTest {
 
     @Test
     void theScaleIsUsedByBothReadPathsTheSameWay() {
-        // The evaluation path and the read-back path must not be able to disagree, so this pins
-        // the whole scale rather than one boundary at a time.
         assertEquals(Severity.LOW, SeverityAssessment.assess(0, List.of(Severity.LOW)));
         assertEquals(Severity.MEDIUM, SeverityAssessment.assess(0, List.of(Severity.MEDIUM)));
         assertEquals(Severity.HIGH, SeverityAssessment.assess(0, List.of(Severity.HIGH)));

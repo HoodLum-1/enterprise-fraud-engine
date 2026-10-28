@@ -81,10 +81,6 @@ class TransactionTest {
 
     @Test
     void theSameEventSpelledDifferentlyIsStillTheSameTransaction() {
-        // These are the differences a retry produces without any intent behind them: the client
-        // re-serialised the amount, upper-cased the category it had typed in lower case, or sent
-        // an empty optional instead of omitting it. Refusing them would answer a harmless retry
-        // with a conflict the caller cannot resolve.
         Transaction original = transaction();
 
         assertTrue(original.isSameTransactionAs(transaction()));
@@ -98,7 +94,6 @@ class TransactionTest {
 
     @Test
     void aBlankMerchantNameAndAnAbsentOneAreTheSameTransaction() {
-        // Both mean "the caller told us nothing", which is what the column holds either way.
         assertTrue(builder().merchantName("").build()
             .isSameTransactionAs(builder().merchantName(null).build()));
         assertTrue(builder().location("   ").build()
@@ -125,8 +120,6 @@ class TransactionTest {
 
     @Test
     void aDifferentEventTimeIsADifferentTransactionEvenWhenEverythingElseMatches() {
-        // Two payments at different times are two payments. Collapsing them would drop the second
-        // one and every alert it would have raised.
         Transaction first = transaction();
         Transaction second = builder().timestamp(first.timestamp().plusMillis(1)).build();
 

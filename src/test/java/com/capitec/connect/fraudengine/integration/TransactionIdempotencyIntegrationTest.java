@@ -42,16 +42,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/**
- * One transaction id, submitted more than once.
- *
- * <p>A caller that posts a transaction and does not see the response has no way to find out
- * whether the evaluation happened, so it retries. Answering that retry with a conflict tells the
- * caller something went wrong when nothing did, and answering it with a second evaluation would
- * store the transaction twice or, worse, replace the first one. So a retry that describes the same
- * transaction gets the evaluation already stored, and only a genuinely different transaction under
- * the same id is refused.
- */
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("integration")
@@ -108,9 +98,6 @@ class TransactionIdempotencyIntegrationTest {
         String replayed = evaluate(request).andExpect(status().isOk())
             .andReturn().getResponse().getContentAsString();
 
-        // A caller that missed the 201 has to be able to recognise its own earlier success from
-        // the body, so the replay is the same evaluation rather than a fresh, possibly different,
-        // one computed against a history that now includes the transaction itself.
         assertEquals(created, replayed, "a retry must return exactly what the first call returned");
         assertEquals(alertsAfterFirst, alertsOn(request),
             "a retry must not evaluate the transaction a second time");
@@ -126,9 +113,6 @@ class TransactionIdempotencyIntegrationTest {
         String created = evaluate(original).andExpect(status().isCreated())
             .andReturn().getResponse().getContentAsString();
 
-        // Same event: the amount re-serialised with one fewer decimal place and the category
-        // typed in lower case. Neither changes what the rules read, so neither is a new claim on
-        // the id.
         TransactionRequestDto respelt = IntegrationTestDataFactory
             .highAmountTransaction("ACC-IDEM-002")
             .id(original.id())
@@ -159,8 +143,6 @@ class TransactionIdempotencyIntegrationTest {
 
         evaluate(conflicting).andExpect(status().isConflict());
 
-        // The stored transaction and the alerts evaluated from it are untouched: accepting the
-        // second request would have replaced a transaction an analyst may already be reading.
         TransactionEntity stored = transactionRepository.findById(original.id()).orElseThrow();
         assertEquals(original.amount(), stored.getAmount());
         assertEquals(original.category(), stored.getCategory());
@@ -190,8 +172,6 @@ class TransactionIdempotencyIntegrationTest {
             int firstStatus = first.get(60, TimeUnit.SECONDS);
             int secondStatus = second.get(60, TimeUnit.SECONDS);
 
-            // Losing a race to your own duplicate is an ordinary outcome. Reporting it as a
-            // server error would tell the caller to retry the thing that just conflicted.
             assertOrdinaryOutcome(firstStatus);
             assertOrdinaryOutcome(secondStatus);
             assertEquals(1, Stream.of(firstStatus, secondStatus).filter(status -> status == 201).count(),
