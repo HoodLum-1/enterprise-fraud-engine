@@ -46,15 +46,15 @@ jobs:
           echo "All infrastructure services are up and healthy!"
 
       - name: Run unit and integration test suites
-        run: ./mvnw --batch-mode verify
-        env:
-          SPRING_PROFILES_ACTIVE: test
-          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/fraud_db
-          SPRING_DATASOURCE_USERNAME: postgres
-          SPRING_DATASOURCE_PASSWORD: postgres
-          SPRING_KAFKA_BOOTSTRAP_SERVERS: localhost:9092
-          SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://localhost:8180/realms/fraud-engine
-          SPRING_JPA_HIBERNATE_DDL_AUTO: create-drop
+        run: |
+          ./mvnw --batch-mode verify \
+            -Dspring.profiles.active=test \
+            -Dspring.datasource.url=jdbc:postgresql://localhost:5432/fraud_db \
+            -Dspring.datasource.username=postgres \
+            -Dspring.datasource.password=postgres \
+            -Dspring.kafka.bootstrap-servers=localhost:9092 \
+            -Dspring.security.oauth2.resourceserver.jwt.issuer-uri=http://localhost:8180/realms/fraud-engine \
+            -Dspring.jpa.hibernate.ddl-auto=create-drop
 
       - name: Check API contract artifacts
         run: python3 scripts/check_api_contract.py
