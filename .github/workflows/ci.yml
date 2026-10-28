@@ -33,19 +33,11 @@ jobs:
             sleep 2
           done
 
-          echo "Waiting for Keycloak to finish booting..."
-          for i in {1..60}; do
-            if docker compose logs keycloak | grep -q "Started in"; then
-              echo "Keycloak is ready!"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "ERROR: Keycloak failed to start in time. Container logs:"
-              docker compose logs keycloak
-              exit 1
-            fi
-            sleep 3
+          echo "Waiting for Keycloak container to be running..."
+          until [ "$(docker inspect -f '{{.State.Running}}' fraud_keycloak 2>/dev/null)" = "true" ]; do
+            sleep 2
           done
+          sleep 5
 
           echo "Waiting for Kafka..."
           until nc -z localhost 9092; do
