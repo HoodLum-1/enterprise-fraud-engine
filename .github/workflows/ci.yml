@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
+    branches: [ "**" ]
   pull_request:
+    branches: [ "**" ]
 
 permissions:
   contents: read
@@ -23,18 +25,56 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Start infrastructure services via Docker Compose
-        run: docker compose up -d postgres zookeeper kafka keycloak
+      - name: Start PostgreSQL container
+        run: |
+          docker run -d --name fraud_postgres \
+            -e POSTGRES_DB=fraud_db \
+            -e POSTGRES_USER=postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -p 5432:5432 \
+            postgres:16-alpine
+
+      - name: Start Zookeeper container
+        run: |
+          docker run -d --name fraud_zookeeper \
+            -e ZOOKEEPER_CLIENT_PORT=2181 \
+            -e ZOOKEEPER_TICK_TIME=2000 \
+            confluentinc/cp-zookeeper:7.5.0
+
+      - name: Start Kafka container
+        run: |
+          docker run -d --name fraud_kafka \
+            --link fraud_zookeeper:zookeeper \
+            -p 9092:9092 \
+            -e KAFKA_BROKER_ID=1 \
+            -e KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181 \
+            -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT \
+            -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://fraud_kafka:29092,PLAINTEXT_HOST://localhost:9092 \
+            -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
+            confluentinc/cp-kafka:7.5.0
+
+      - name: Start Keycloak container
+        run: |
+          docker run -d --name fraud_keycloak \
+            -p 8180:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            -e KC_HOSTNAME=http://localhost:8180 \
+            -e KC_HEALTH_ENABLED=true \
+            -v $(pwd)/config/keycloak:/opt/keycloak/data/import:ro \
+            quay.io/keycloak/keycloak:26.2.5 start-dev --import-realm
 
       - name: Wait for services to be ready
         run: |
           echo "Waiting for PostgreSQL TCP port to be ready..."
-          until docker compose exec -T postgres pg_isready -h 127.0.0.1 -U postgres -d fraud_db; do
+          until docker exec fraud_postgres pg_isready -h 127.0.0.1 -U postgres -d fraud_db; do
             sleep 2
           done
 
           echo "Waiting for Keycloak container to be running..."
-          until [ "$(docker inspect -f '{{.State.Running}}' fraud_keycloak 2>/dev/null)" = "true" ]; do
+          until [ "$(docker inspect -f '{{.State.Running}}' fraud_keycloak 2=/dev/null)" = "true" ]; do
             sleep 2
           done
           sleep 5
@@ -44,6 +84,9 @@ jobs:
             sleep 2
           done
           echo "All infrastructure services are up and healthy!"
+
+      - name: Grant execute permission for Maven wrapper
+        run: chmod +x mvnw
 
       - name: Run unit and integration test suites
         run: |
