@@ -33,9 +33,9 @@ jobs:
             sleep 2
           done
 
-          echo "Waiting for Keycloak to boot up..."
+          echo "Waiting for Keycloak to finish booting..."
           for i in {1..60}; do
-            if curl --output /dev/null --silent --head --fail http://localhost:9000/health/ready; then
+            if docker compose logs keycloak | grep -q "Started in"; then
               echo "Keycloak is ready!"
               break
             fi
