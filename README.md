@@ -85,7 +85,7 @@ Topic names, rule settings, rate limiting, and freeze policy are configurable in
 docker compose config
 ```
 
-Unit tests use H2 and run under Surefire. Integration tests use Testcontainers PostgreSQL and Kafka with Flyway enabled and run under Failsafe, so Docker must be available. `application-integration.yml` selects this integration configuration. The coverage gate covers the merged unit and integration coverage.
+Unit tests ending in `*Test.java` use H2 and run under Surefire. Spring application-context, security, and external-service tests ending in `*IT.java` run under Failsafe; the Testcontainers suite uses PostgreSQL and Kafka with Flyway enabled, so Docker must be available for `./mvnw verify`. `application-integration.yml` selects the Testcontainers integration configuration. The coverage gate covers the merged unit and integration coverage.
 
 Authenticated smoke checks require Keycloak analyst credentials:
 

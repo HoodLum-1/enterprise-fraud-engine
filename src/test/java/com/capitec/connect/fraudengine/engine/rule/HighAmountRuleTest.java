@@ -82,7 +82,7 @@ class HighAmountRuleTest {
     void shouldRejectCurrenciesWithoutConfiguredThreshold() {
         Transaction tx = FraudTestDataFactory.transaction().currency("EUR").build();
 
-        assertThrows(com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException.class,
+        assertThrows(com.capitec.connect.fraudengine.domain.exception.UnsupportedCurrencyException.class,
             () -> rule.evaluate(tx, List.of()));
     }
 

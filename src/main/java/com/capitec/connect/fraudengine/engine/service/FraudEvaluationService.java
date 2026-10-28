@@ -4,7 +4,7 @@ import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException;
 import com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException;
 import com.capitec.connect.fraudengine.api.exception.EvaluationUnavailableException;
-import com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException;
+import com.capitec.connect.fraudengine.domain.exception.UnsupportedCurrencyException;
 import com.capitec.connect.fraudengine.domain.model.EvaluationOutcome;
 import com.capitec.connect.fraudengine.domain.model.EvaluationSummary;
 import com.capitec.connect.fraudengine.domain.model.FraudAlert;

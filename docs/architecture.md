@@ -30,7 +30,7 @@ The transaction ID identifies the request, so submitting it again is safe. When 
 
 ### Per-account concurrency
 
-Concurrent evaluations of the same account are serialised by a PostgreSQL transaction-scoped advisory lock, taken before the duplicate check and before the history read. Without it, two concurrent evaluations would each read a history that excludes the other's uncommitted write, and the velocity and location-mismatch rules could both be missed. `AccountLockIntegrationTest` covers the lock lifecycle and a simultaneous pair of evaluations for one account that must produce exactly one velocity alert.
+Concurrent evaluations of the same account are serialised by a PostgreSQL transaction-scoped advisory lock, taken before the duplicate check and before the history read. Without it, two concurrent evaluations would each read a history that excludes the other's uncommitted write, and the velocity and location-mismatch rules could both be missed. `AccountLockIT` covers the lock lifecycle and a simultaneous pair of evaluations for one account that must produce exactly one velocity alert.
 
 The lock is acquired with a `lock_timeout` (default `PT2S`, `fraud.engine.lock.timeout`). A contended account fails fast with `AccountLockTimeoutException`, which is reported as `503` with `Retry-After: 1` rather than parking a request on one of the 20 Hikari connections. The timeout is not a `DataAccessException` and is listed in the circuit breaker's `ignoreExceptions`, so contention on one account cannot open the circuit for every other caller.
 
@@ -112,9 +112,9 @@ The evaluation timer publishes client-side percentiles and a server-side histogr
 - Unit tests use H2, disable Flyway, and use Hibernate `create-drop`; they do not prove production-schema compatibility.
 - Integration tests use Testcontainers PostgreSQL and Kafka, run Flyway, and set Hibernate to `validate`.
 - Integration coverage includes the REST location-mismatch flow, Kafka transaction ingestion, outbox publishing, case/freeze processing, the per-account lock, and real HTTP rate-limit and unavailable-engine responses.
-- Surefire runs the unit tests and excludes `**/*IntegrationTest.java`; Failsafe runs the integration tests, so `./mvnw test` is a fast loop that needs no Docker and `./mvnw verify` runs everything. Docker is required for the Testcontainers suite.
+- Surefire runs unit tests ending in `*Test.java` and excludes `**/*IT.java`; Failsafe runs full-context, security, and integration tests ending in `*IT.java`. Therefore `./mvnw test` is a fast loop that needs no Docker, while `./mvnw verify` runs everything. Docker is required for the Testcontainers suite.
 - The JaCoCo coverage gate runs on the merged unit and integration coverage, so the integration tests count towards it.
-- `KeycloakSecurityIntegrationTest` starts a real Keycloak with the realm from `config/keycloak`, and registers the issuer and the JWK set URI of that instance. The issuer in a token has to match the issuer the service trusts, which is why the container is given a fixed host port and the issuer is derived from it.
+- `KeycloakSecurityIT` starts a real Keycloak with the realm from `config/keycloak`, and registers the issuer and the JWK set URI of that instance. The issuer in a token has to match the issuer the service trusts, which is why the container is given a fixed host port and the issuer is derived from it.
 - The test `application.yml` replaces the main one rather than merging with it, so any setting the tests rely on has to be repeated there.
 
 ## Deliberate scope limits

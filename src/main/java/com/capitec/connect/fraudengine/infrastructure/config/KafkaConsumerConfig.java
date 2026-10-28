@@ -1,6 +1,6 @@
 package com.capitec.connect.fraudengine.infrastructure.config;
 
-import com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException;
+import com.capitec.connect.fraudengine.domain.exception.UnsupportedCurrencyException;
 import com.capitec.connect.fraudengine.infrastructure.messaging.MalformedTransactionEventException;
 import com.capitec.connect.fraudengine.infrastructure.messaging.TransactionEvaluatedEvent;
 import jakarta.validation.ConstraintViolationException;
@@ -19,7 +19,6 @@ import org.springframework.kafka.core.*;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.util.backoff.ExponentialBackOff;
-import org.springframework.beans.factory.annotation.Value;
 
 import java.util.HashMap;
 import java.util.Map;

@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("integration")
 // Spring Boot disables metrics export in tests unless this is present.
 @AutoConfigureObservability
-class MetricsIntegrationTest {
+class MetricsIT {
 
     @Container
     @ServiceConnection

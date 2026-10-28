@@ -26,7 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "resilience4j.ratelimiter.instances.fraudEngine.limitRefreshPeriod=1h",
     "resilience4j.ratelimiter.instances.fraudEngine.timeoutDuration=0"
 })
-class RateLimitIntegrationTest {
+class RateLimitIT {
 
     @Autowired
     private MockMvc mockMvc;

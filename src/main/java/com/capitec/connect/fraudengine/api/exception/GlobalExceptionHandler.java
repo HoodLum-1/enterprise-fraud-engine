@@ -1,5 +1,6 @@
 package com.capitec.connect.fraudengine.api.exception;
 
+import com.capitec.connect.fraudengine.domain.exception.UnsupportedCurrencyException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;

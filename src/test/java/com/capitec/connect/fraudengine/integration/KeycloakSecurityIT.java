@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class KeycloakSecurityIntegrationTest {
+class KeycloakSecurityIT {
 
     private static final int KEYCLOAK_HOST_PORT = findFreePort();
     private static final String REALM = "fraud-engine";

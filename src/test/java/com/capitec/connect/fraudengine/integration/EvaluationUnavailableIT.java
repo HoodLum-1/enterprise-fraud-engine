@@ -26,7 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @TestPropertySource(properties = "security.enabled=false")
-class EvaluationUnavailableIntegrationTest {
+class EvaluationUnavailableIT {
 
     @Autowired
     private MockMvc mockMvc;

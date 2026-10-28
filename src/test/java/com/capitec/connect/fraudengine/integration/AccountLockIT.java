@@ -48,7 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Testcontainers
 @SpringBootTest
 @ActiveProfiles("integration")
-class AccountLockIntegrationTest {
+class AccountLockIT {
 
     @Container
     @ServiceConnection

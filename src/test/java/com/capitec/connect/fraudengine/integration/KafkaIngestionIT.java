@@ -51,7 +51,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "resilience4j.ratelimiter.instances.fraudEngine.limitForPeriod=1",
     "resilience4j.ratelimiter.instances.fraudEngine.limitRefreshPeriod=1s"
 })
-class KafkaIngestionIntegrationTest {
+class KafkaIngestionIT {
 
     private static final String TRANSACTION_TOPIC = "transactions-topic";
     private static final String DLQ_TOPIC = TRANSACTION_TOPIC + "-dlq";

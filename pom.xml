@@ -211,7 +211,7 @@
 					<argLine>@{argLine} -XX:+EnableDynamicAgentLoading</argLine>
 					<!-- The integration tests run under Failsafe, see the failsafe plugin below. -->
 					<excludes>
-						<exclude>**/*IntegrationTest.java</exclude>
+						<exclude>**/*IT.java</exclude>
 					</excludes>
 				</configuration>
 			</plugin>
@@ -219,9 +219,12 @@
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-failsafe-plugin</artifactId>
 				<configuration>
-					<!-- Failsafe defaults to *IT, the integration tests are named *IntegrationTest. -->
+					<!-- Close cached Spring contexts and their clients before each test's
+					     class-scoped Testcontainers are stopped. -->
+					<forkCount>1</forkCount>
+					<reuseForks>false</reuseForks>
 					<includes>
-						<include>**/*IntegrationTest.java</include>
+						<include>**/*IT.java</include>
 					</includes>
 					<argLine>@{failsafeArgLine} -XX:+EnableDynamicAgentLoading</argLine>
 				</configuration>

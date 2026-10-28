@@ -114,7 +114,7 @@ resilience4j:
         failureRateThreshold: 50
         ignoreExceptions:
           - com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException
-          - com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException
+          - com.capitec.connect.fraudengine.domain.exception.UnsupportedCurrencyException
           - com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException
           - io.github.resilience4j.ratelimiter.RequestNotPermitted
   ratelimiter:

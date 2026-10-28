@@ -1,13 +1,12 @@
 package com.capitec.connect.fraudengine.infrastructure.config;
 
 import com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException;
-import com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException;
+import com.capitec.connect.fraudengine.domain.exception.UnsupportedCurrencyException;
 import com.capitec.connect.fraudengine.infrastructure.messaging.MalformedTransactionEventException;
 import jakarta.validation.ConstraintViolationException;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.SerializationException;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.core.KafkaTemplate;

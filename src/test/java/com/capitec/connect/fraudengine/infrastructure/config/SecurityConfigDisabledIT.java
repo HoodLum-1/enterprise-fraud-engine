@@ -16,7 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @TestPropertySource(properties = "security.enabled=false")
-class SecurityConfigDisabledTest {
+class SecurityConfigDisabledIT {
 
     @Autowired
     private MockMvc mockMvc;

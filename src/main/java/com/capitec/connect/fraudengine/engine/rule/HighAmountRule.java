@@ -1,9 +1,9 @@
 package com.capitec.connect.fraudengine.engine.rule;
 
+import com.capitec.connect.fraudengine.domain.exception.UnsupportedCurrencyException;
 import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.domain.model.Transaction;
-import com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException;
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

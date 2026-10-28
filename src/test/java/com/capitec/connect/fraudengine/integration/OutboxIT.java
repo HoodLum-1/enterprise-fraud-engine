@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ActiveProfiles("integration")
 // The scheduled publisher would race with the assertions below, so its poll interval is pushed out.
 @TestPropertySource(properties = "fraud.engine.messaging.outbox-poll-delay-ms=3600000")
-class OutboxIntegrationTest {
+class OutboxIT {
 
     private static final String BATCH_EVENT_KEY = "ACC-OUTBOX-BATCH-TEST";
 

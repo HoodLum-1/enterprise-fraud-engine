@@ -3,7 +3,7 @@ package com.capitec.connect.fraudengine.infrastructure.messaging;
 import com.capitec.connect.fraudengine.api.dto.request.TransactionRequestDto;
 import com.capitec.connect.fraudengine.api.exception.AccountLockTimeoutException;
 import com.capitec.connect.fraudengine.api.exception.DuplicateTransactionException;
-import com.capitec.connect.fraudengine.api.exception.UnsupportedCurrencyException;
+import com.capitec.connect.fraudengine.domain.exception.UnsupportedCurrencyException;
 import com.capitec.connect.fraudengine.engine.service.FraudEvaluationService;
 import com.capitec.connect.fraudengine.util.FraudTestDataFactory;
 import com.fasterxml.jackson.core.JsonProcessingException;
