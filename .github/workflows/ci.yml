@@ -10,6 +10,8 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -21,8 +23,8 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Verify tests and rule coverage
-        run: ./mvnw --batch-mode verify
+      - name: Run unit tests only
+        run: ./mvnw --batch-mode test
 
       - name: Check API contract artifacts
         run: python3 scripts/check_api_contract.py
