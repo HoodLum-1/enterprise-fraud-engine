@@ -135,6 +135,19 @@ public class GlobalExceptionHandler {
         return problemDetail;
     }
 
+    @ExceptionHandler(UnsupportedCurrencyException.class)
+    public ProblemDetail handleUnsupportedCurrency(UnsupportedCurrencyException ex) {
+        log.warn("Unsupported currency: {}", ex.getMessage());
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_REQUEST,
+                ex.getMessage()
+        );
+        problemDetail.setTitle("Bad Request");
+        problemDetail.setType(URI.create("https://api.capitec.com/errors/bad-request"));
+        problemDetail.setProperty("timestamp", Instant.now());
+        return problemDetail;
+    }
+
     @ExceptionHandler({RateLimitExceededException.class, RequestNotPermitted.class})
     public ResponseEntity<ProblemDetail> handleRateLimitExceeded(Exception ex) {
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(

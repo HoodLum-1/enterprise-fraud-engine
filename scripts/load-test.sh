@@ -45,8 +45,6 @@ log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
 # Safe bc evaluation: always prints exactly one non-empty numeric token.
-# `bc -l` output is truncated to its first line and stripped of whitespace, so the
-# value can never leak a newline into a printf format argument.
 safe_bc() {
     local out
     out=$(printf '%s\n' "$1" | bc -l 2>/dev/null | head -n 1 | tr -d '[:space:]' || true)
@@ -54,8 +52,6 @@ safe_bc() {
 }
 
 # Counts lines matching an exact HTTP status code.
-# NOTE: `grep -c` already prints "0" when nothing matches (and exits 1), so it must not be
-# combined with `|| echo 0` — that produced "0\n0" and blew up the summary printf.
 count_status() {
     local code="$1" n
     n=$(awk -v code="$code" '$1 == code { count++ } END { print count + 0 }' "$results_file" 2>/dev/null) || n=0
@@ -95,7 +91,7 @@ print(past.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z")'
 }
 
 main() {
-# Auto-fetch JWT token if not explicitly provided but credentials exist
+    # Auto-fetch JWT token if not explicitly provided but credentials exist
     if [[ -z "${AUTH_TOKEN:-}" ]]; then
         if [[ -n "${KEYCLOAK_USERNAME:-}" && -n "${KEYCLOAK_PASSWORD:-}" ]]; then
             log_info "Fetching JWT token from Keycloak for ${KEYCLOAK_USERNAME}..."
@@ -176,8 +172,6 @@ except Exception as e:
     log_info "Starting load test (concurrency ${CONCURRENCY})..."
     start_time=$(python3 -c 'import time; print(time.time())')
 
-    # Keep exactly CONCURRENCY requests in flight at any time (rolling pool, no wave barriers).
-    # `jobs -rp` is used instead of `wait -n` so this also works on bash 3.2 (macOS default).
     for ((j = 1; j <= TOTAL_REQUESTS; j++)); do
         while :; do
             running=$(jobs -rp | wc -l | tr -d '[:space:]')

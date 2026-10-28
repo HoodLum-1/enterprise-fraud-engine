@@ -19,6 +19,8 @@
 		<resilience4j.version>2.3.0</resilience4j.version>
 		<flyway.version>10.20.0</flyway.version>
 		<spring.version>3.5.14</spring.version>
+		<archunit.version>1.4.1</archunit.version>
+		<failsafeArgLine></failsafeArgLine>
 	</properties>
 	<dependencies>
 		<dependency>

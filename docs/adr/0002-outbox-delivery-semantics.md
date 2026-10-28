@@ -48,13 +48,8 @@ Ship **unordered at-least-once delivery**, and make the failure modes explicit.
 
 ## Consequences
 
-- Delivery stays at-least-once. A publisher that publishes successfully and then fails to record
-  the acknowledgement will publish the row again; consumers must deduplicate on the event id.
-- A row can be lost if every publisher dies after publishing but before acknowledging, and the row
-  is then parked as `FAILED` after the retry budget. Parking makes that case visible for replay.
-- There is no automated replay of parked rows. Replaying a `FAILED` row is an operational action
-  and is listed as a known limitation.
-- The outbox table is bounded by the retention period rather than growing without limit.
+- Published-but-unacknowledged rows may be re-published under failure scenarios, requiring downstream consumer idempotency.
+- Parked `FAILED` rows require manual operational review and replay via administrative tooling.
 
 ## Alternatives considered
 

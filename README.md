@@ -95,7 +95,7 @@ KEYCLOAK_PASSWORD='your-password' \
 ./smoke-test-with-auth.sh
 ```
 
-`smoke-test.sh` is for a separately started `dev`-profile instance. The load test needs an authorized JWT when security is enabled:
+`scripts/smoke-test.sh` is for a separately started `dev`-profile instance. The load test needs an authorized JWT when security is enabled:
 
 ```bash
 AUTH_TOKEN='eyJ...' TOTAL_REQUESTS=100 CONCURRENCY=10 ./load-test.sh

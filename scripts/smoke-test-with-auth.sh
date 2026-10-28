@@ -208,7 +208,43 @@ echo "✅ Account fraud alerts retrieved successfully."
 
 echo ""
 echo "------------------------------------------------------------"
-echo "6. Waiting for fraud case to be created by Kafka consumer..."
+echo "6. Fetching Specific Transaction Details (Expect HTTP 200 OK)..."
+echo "------------------------------------------------------------"
+HTTP_CODE=$(curl -s -o /tmp/tx_details_response.json -w "%{http_code}" \
+  -H "Authorization: Bearer $TOKEN" \
+  -X GET "$BASE_URL/api/v1/transactions/$CLEAN_TX_ID")
+
+echo "Response code: $HTTP_CODE"
+cat /tmp/tx_details_response.json
+echo ""
+
+if [ "$HTTP_CODE" -ne 200 ]; then
+    echo "❌ Fetch transaction details test failed! Expected 200, got $HTTP_CODE"
+    exit 1
+fi
+echo "✅ Transaction details retrieved successfully."
+
+echo ""
+echo "------------------------------------------------------------"
+echo "7. Listing All Fraud Cases with Analyst Role (Expect HTTP 200 OK)..."
+echo "------------------------------------------------------------"
+HTTP_CODE=$(curl -s -o /tmp/fraud_cases_list_response.json -w "%{http_code}" \
+  -H "Authorization: Bearer $TOKEN" \
+  -X GET "$BASE_URL/api/v1/fraud-cases")
+
+echo "Response code: $HTTP_CODE"
+cat /tmp/fraud_cases_list_response.json
+echo ""
+
+if [ "$HTTP_CODE" -ne 200 ]; then
+    echo "❌ List fraud cases test failed! Expected 200, got $HTTP_CODE"
+    exit 1
+fi
+echo "✅ Fraud cases listed successfully."
+
+echo ""
+echo "------------------------------------------------------------"
+echo "8. Waiting for fraud case to be created by Kafka consumer..."
 echo "------------------------------------------------------------"
 CASE_URL="$BASE_URL/api/v1/fraud-cases/transaction/$HIGH_AMOUNT_TX_ID"
 HTTP_CODE=404
@@ -239,7 +275,7 @@ echo "✅ Fraud case created and retrieved successfully."
 
 echo ""
 echo "------------------------------------------------------------"
-echo "7. Updating Fraud Case Status (Expect HTTP 200 OK)..."
+echo "9. Updating Fraud Case Status (Expect HTTP 200 OK)..."
 echo "------------------------------------------------------------"
 HTTP_CODE=$(curl -s -o /tmp/fraud_case_update_response.json -w "%{http_code}" -X PATCH \
   -H "Authorization: Bearer $TOKEN" \
@@ -257,7 +293,7 @@ echo "✅ Fraud case status updated successfully."
 
 echo ""
 echo "------------------------------------------------------------"
-echo "8. Checking Actuator Prometheus Metrics (Expect HTTP 200 OK)..."
+echo "10. Checking Actuator Prometheus Metrics (Expect HTTP 200 OK)..."
 echo "------------------------------------------------------------"
 HTTP_CODE=$(curl -s -o /tmp/metrics_response.txt -w "%{http_code}" -H "Authorization: Bearer $TOKEN" \
   -X GET "$BASE_URL/actuator/prometheus")
