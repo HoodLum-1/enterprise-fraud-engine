@@ -2,9 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ "**" ]
   pull_request:
-    branches: [ "**" ]
 
 permissions:
   contents: read
@@ -74,7 +72,7 @@ jobs:
           done
 
           echo "Waiting for Keycloak container to be running..."
-          until [ "$(docker inspect -f '{{.State.Running}}' fraud_keycloak 2=/dev/null)" = "true" ]; do
+          until [ "$(docker inspect -f '{{.State.Running}}' fraud_keycloak 2>/dev/null)" = "true" ]; do
             sleep 2
           done
           sleep 5
@@ -95,7 +93,9 @@ jobs:
             -Dspring.datasource.url=jdbc:postgresql://localhost:5432/fraud_db \
             -Dspring.datasource.username=postgres \
             -Dspring.datasource.password=postgres \
+            -Dspring.datasource.driver-class-name=org.postgresql.Driver \
             -Dspring.kafka.bootstrap-servers=localhost:9092 \
+            -Dspring.kafka.admin.properties.replication.factor=1 \
             -Dspring.security.oauth2.resourceserver.jwt.issuer-uri=http://localhost:8180/realms/fraud-engine \
             -Dspring.jpa.hibernate.ddl-auto=create-drop
 
