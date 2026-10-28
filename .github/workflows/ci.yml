@@ -33,9 +33,9 @@ jobs:
             sleep 2
           done
 
-          echo "Waiting for Keycloak to boot up (timeout: 3 minutes)..."
+          echo "Waiting for Keycloak to boot up..."
           for i in {1..60}; do
-            if curl --output /dev/null --silent --head --fail http://localhost:8180/health/ready; then
+            if curl --output /dev/null --silent --head --fail http://localhost:9000/health/ready; then
               echo "Keycloak is ready!"
               break
             fi
