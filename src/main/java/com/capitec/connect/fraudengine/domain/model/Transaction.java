@@ -33,7 +33,6 @@ public record Transaction(
             throw new IllegalArgumentException("Category must not be null or blank");
         }
         Objects.requireNonNull(timestamp, "Timestamp must not be null");
-        timestamp = timestamp.truncatedTo(ChronoUnit.MICROS) ;
     }
 
     public boolean isSameTransactionAs(Transaction other) {
