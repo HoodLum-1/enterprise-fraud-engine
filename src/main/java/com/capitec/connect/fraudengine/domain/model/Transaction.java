@@ -2,6 +2,7 @@ package com.capitec.connect.fraudengine.domain.model;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
@@ -32,6 +33,7 @@ public record Transaction(
             throw new IllegalArgumentException("Category must not be null or blank");
         }
         Objects.requireNonNull(timestamp, "Timestamp must not be null");
+        timestamp = timestamp.truncatedTo(ChronoUnit.MICROS) ;
     }
 
     public boolean isSameTransactionAs(Transaction other) {
@@ -45,7 +47,10 @@ public record Transaction(
             && Objects.equals(code(category), code(other.category))
             && Objects.equals(canonical(merchantName), canonical(other.merchantName))
             && Objects.equals(canonical(location), canonical(other.location))
-            && Objects.equals(timestamp, other.timestamp);
+            && Objects.equals(
+                timestamp.truncatedTo(ChronoUnit.MICROS),
+                other.timestamp.truncatedTo(ChronoUnit.MICROS)
+            );
     }
 
     private static String canonical(String value) {

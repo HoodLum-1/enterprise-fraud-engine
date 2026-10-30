@@ -35,6 +35,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -131,7 +132,10 @@ class FraudEngineIT {
         assertEquals(request.category(), savedTx.getCategory());
         assertEquals(request.merchantName(), savedTx.getMerchantName());
         assertEquals(request.location(), savedTx.getLocation());
-        assertEquals(request.timestamp(), savedTx.getTimestamp());
+        assertEquals(
+                request.timestamp().truncatedTo(ChronoUnit.MICROS),
+                savedTx.getTimestamp()
+        );
 
         assertTrue(fraudAlertRepository.findByAccountIdOrderByFlaggedAtDesc(
             request.accountId(), org.springframework.data.domain.PageRequest.of(0, 20))

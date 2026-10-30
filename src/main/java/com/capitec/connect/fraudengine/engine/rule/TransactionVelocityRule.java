@@ -4,6 +4,8 @@ import com.capitec.connect.fraudengine.domain.model.RuleEvaluationResult;
 import com.capitec.connect.fraudengine.domain.model.Severity;
 import com.capitec.connect.fraudengine.domain.model.Transaction;
 import com.capitec.connect.fraudengine.infrastructure.config.FraudEngineProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.annotation.Order;
@@ -18,6 +20,7 @@ import java.util.List;
 public class TransactionVelocityRule implements FraudRule {
 
     private static final String RULE_NAME = "TransactionVelocityRule";
+    private static final Logger log = LoggerFactory.getLogger(TransactionVelocityRule.class);
 
     private final FraudEngineProperties properties;
 
@@ -47,6 +50,14 @@ public class TransactionVelocityRule implements FraudRule {
         }
 
         FraudEngineProperties.Velocity config = properties.getRules().getVelocity();
+        log.info(
+                "VELOCITY_DIAGNOSTIC rule: enabled={}, threshold={}, window={}, currentTimestamp={}, historyCount={}",
+                config.isEnabled(),
+                config.getThreshold(),
+                config.getWindow(),
+                currentTransaction.timestamp(),
+                accountHistory.size()
+        );
         Instant currentTimestamp = currentTransaction.timestamp();
         Instant windowStart = currentTimestamp.minus(config.getWindow());
 
@@ -56,6 +67,13 @@ public class TransactionVelocityRule implements FraudRule {
             .count();
 
         long totalTransactionCount = previousTransactionCount + 1;
+        log.info(
+                "VELOCITY_DIAGNOSTIC count: previous={}, total={}, threshold={}, triggered={}",
+                previousTransactionCount,
+                totalTransactionCount,
+                config.getThreshold(),
+                totalTransactionCount > config.getThreshold()
+        );
         if (totalTransactionCount > config.getThreshold()) {
             return new RuleEvaluationResult(
                 RULE_NAME,
