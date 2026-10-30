@@ -4,106 +4,80 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   verify:
+    name: Build, test and verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    env:
+      MAVEN_OPTS: >-
+        -Xmx2g
+        -XX:+UseG1GC
+        -Djava.awt.headless=true
+
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
           cache: maven
+          cache-dependency-path: |
+            pom.xml
+            .mvn/wrapper/maven-wrapper.properties
 
-      - name: Start PostgreSQL container
+      - name: Verify Maven wrapper and Docker
+        shell: bash
         run: |
-          docker run -d --name fraud_postgres \
-            -e POSTGRES_DB=fraud_db \
-            -e POSTGRES_USER=postgres \
-            -e POSTGRES_PASSWORD=postgres \
-            -p 5432:5432 \
-            postgres:16-alpine
+          set -euo pipefail
+          chmod +x ./mvnw
+          ./mvnw --version
+          docker version
+          docker info
 
-      - name: Start Zookeeper container
+      - name: Run unit and integration tests
+        shell: bash
         run: |
-          docker run -d --name fraud_zookeeper \
-            -e ZOOKEEPER_CLIENT_PORT=2181 \
-            -e ZOOKEEPER_TICK_TIME=2000 \
-            confluentinc/cp-zookeeper:7.5.0
-
-      - name: Start Kafka container
-        run: |
-          docker run -d --name fraud_kafka \
-            --link fraud_zookeeper:zookeeper \
-            -p 9092:9092 \
-            -e KAFKA_BROKER_ID=1 \
-            -e KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181 \
-            -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT \
-            -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://fraud_kafka:29092,PLAINTEXT_HOST://localhost:9092 \
-            -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
-            -e KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 \
-            -e KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
-            confluentinc/cp-kafka:7.5.0
-
-      - name: Start Keycloak container
-        run: |
-          docker run -d --name fraud_keycloak \
-            -p 8180:8080 \
-            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
-            -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
-            -e KC_HOSTNAME=http://localhost:8180 \
-            -e KC_HEALTH_ENABLED=true \
-            -v $(pwd)/config/keycloak:/opt/keycloak/data/import:ro \
-            quay.io/keycloak/keycloak:26.2.5 start-dev --import-realm
-
-      - name: Wait for services to be ready
-        run: |
-          echo "Waiting for PostgreSQL TCP port to be ready..."
-          until docker exec fraud_postgres pg_isready -h 127.0.0.1 -U postgres -d fraud_db; do
-            sleep 2
-          done
-
-          echo "Waiting for Keycloak container to be running..."
-          until [ "$(docker inspect -f '{{.State.Running}}' fraud_keycloak 2>/dev/null)" = "true" ]; do
-            sleep 2
-          done
-          sleep 5
-
-          echo "Waiting for Kafka..."
-          until nc -z localhost 9092; do
-            sleep 2
-          done
-          echo "All infrastructure services are up and healthy!"
-
-      - name: Grant execute permission for Maven wrapper
-        run: chmod +x mvnw
-
-      - name: Run unit and integration test suites
-        run: |
-          ./mvnw --batch-mode verify \
-            -Dspring.profiles.active=test \
-            -Dspring.datasource.url=jdbc:postgresql://localhost:5432/fraud_db \
-            -Dspring.datasource.username=postgres \
-            -Dspring.datasource.password=postgres \
-            -Dspring.datasource.driver-class-name=org.postgresql.Driver \
-            -Dspring.kafka.bootstrap-servers=localhost:9092 \
-            -Dspring.kafka.admin.properties.replication.factor=1 \
-            -Dspring.security.oauth2.resourceserver.jwt.issuer-uri=http://localhost:8180/realms/fraud-engine \
-            -Dspring.jpa.hibernate.ddl-auto=create-drop
+          set -euo pipefail
+          ./mvnw --batch-mode --no-transfer-progress clean verify
 
       - name: Check API contract artifacts
-        run: python3 scripts/check_api_contract.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/check_api_contract.py
 
-      - name: Validate Compose configuration
-        run: docker compose config --quiet
+      - name: Validate Docker Compose configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose config --quiet
 
-      - name: Build application image
-        run: docker build --tag enterprise-fraud-engine:${{ github.sha }} .
+      - name: Build application Docker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --pull --tag enterprise-fraud-engine:${{ github.sha }} .
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maven-test-reports-${{ github.run_id }}
+          path: |
+            **/target/surefire-reports/**
+            **/target/failsafe-reports/**
+            **/target/site/jacoco/**
+          if-no-files-found: ignore
+          retention-days: 1
