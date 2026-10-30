@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -48,6 +49,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Testcontainers
 @SpringBootTest
 @ActiveProfiles("integration")
+@TestPropertySource(properties =
+        "fraud.engine.messaging.outbox-publisher-enabled=false")
 class AccountLockIT {
 
     @Container

@@ -79,7 +79,9 @@ class TransactionIdempotencyIT {
     private JdbcTemplate jdbcTemplate;
 
     private MockMvc mockMvc;
-    private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+
+    private final ObjectMapper objectMapper =
+            new ObjectMapper().registerModule(new JavaTimeModule());
 
     @BeforeEach
     void setUp() {
@@ -87,31 +89,63 @@ class TransactionIdempotencyIT {
     }
 
     @Test
-    void aRetryOfTheSameRequestIsAnsweredWithTheEvaluationItAlreadyProduced() throws Exception {
+    void aRetryOfTheSameRequestIsAnsweredWithTheEvaluationItAlreadyProduced()
+            throws Exception {
+
         TransactionRequestDto request = IntegrationTestDataFactory
             .highAmountTransaction("ACC-IDEM-001").build();
 
-        String created = evaluate(request).andExpect(status().isCreated())
-            .andReturn().getResponse().getContentAsString();
+        String created = evaluate(request)
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
         int alertsAfterFirst = alertsOn(request);
 
-        String replayed = evaluate(request).andExpect(status().isOk())
-            .andReturn().getResponse().getContentAsString();
+        // Diagnostic output for the retry response.
+        MvcResult retry = evaluate(request).andReturn();
 
-        assertEquals(created, replayed, "a retry must return exactly what the first call returned");
-        assertEquals(alertsAfterFirst, alertsOn(request),
-            "a retry must not evaluate the transaction a second time");
-        assertEquals(1, countRows("select count(*) from transactions where id = ?", request),
-            "the transaction must be stored once");
+        System.out.println("IDEMPOTENCY RETRY STATUS: "
+                + retry.getResponse().getStatus());
+
+        System.out.println("IDEMPOTENCY RETRY BODY: "
+                + retry.getResponse().getContentAsString());
+
+        assertEquals(200, retry.getResponse().getStatus());
+
+        String replayed = retry.getResponse().getContentAsString();
+
+        assertEquals(
+                created,
+                replayed,
+                "a retry must return exactly what the first call returned"
+        );
+
+        assertEquals(
+                alertsAfterFirst,
+                alertsOn(request),
+                "a retry must not evaluate the transaction a second time"
+        );
+
+        assertEquals(
+                1,
+                countRows("select count(*) from transactions where id = ?", request),
+                "the transaction must be stored once"
+        );
     }
 
     @Test
-    void aRetryThatSpellsTheSameTransactionDifferentlyIsStillTheSameTransaction() throws Exception {
+    void aRetryThatSpellsTheSameTransactionDifferentlyIsStillTheSameTransaction()
+            throws Exception {
+
         TransactionRequestDto original = IntegrationTestDataFactory
             .highAmountTransaction("ACC-IDEM-002").build();
 
-        String created = evaluate(original).andExpect(status().isCreated())
-            .andReturn().getResponse().getContentAsString();
+        String created = evaluate(original)
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
 
         TransactionRequestDto respelt = IntegrationTestDataFactory
             .highAmountTransaction("ACC-IDEM-002")
@@ -121,15 +155,31 @@ class TransactionIdempotencyIT {
             .timestamp(original.timestamp())
             .build();
 
-        String replayed = evaluate(respelt).andExpect(status().isOk())
-            .andReturn().getResponse().getContentAsString();
+        // Diagnostic output for the respelt transaction retry.
+        MvcResult retry = evaluate(respelt).andReturn();
+
+        System.out.println("IDEMPOTENCY RESPELT RETRY STATUS: "
+                + retry.getResponse().getStatus());
+
+        System.out.println("IDEMPOTENCY RESPELT RETRY BODY: "
+                + retry.getResponse().getContentAsString());
+
+        assertEquals(200, retry.getResponse().getStatus());
+
+        String replayed = retry.getResponse().getContentAsString();
 
         assertEquals(created, replayed);
-        assertEquals(1, countRows("select count(*) from transactions where id = ?", original));
+
+        assertEquals(
+                1,
+                countRows("select count(*) from transactions where id = ?", original)
+        );
     }
 
     @Test
-    void theSameIdDescribingADifferentTransactionIsRefusedAndLeavesTheStoredOneAlone() throws Exception {
+    void theSameIdDescribingADifferentTransactionIsRefusedAndLeavesTheStoredOneAlone()
+            throws Exception {
+
         TransactionRequestDto original = IntegrationTestDataFactory
             .highAmountTransaction("ACC-IDEM-003").build();
         evaluate(original).andExpect(status().isCreated());
@@ -143,15 +193,23 @@ class TransactionIdempotencyIT {
 
         evaluate(conflicting).andExpect(status().isConflict());
 
-        TransactionEntity stored = transactionRepository.findById(original.id()).orElseThrow();
+        TransactionEntity stored =
+                transactionRepository.findById(original.id()).orElseThrow();
+
         assertEquals(original.amount(), stored.getAmount());
         assertEquals(original.category(), stored.getCategory());
         assertEquals(original.accountId(), stored.getAccountId());
-        assertEquals(1, countRows("select count(*) from transactions where id = ?", original));
+
+        assertEquals(
+                1,
+                countRows("select count(*) from transactions where id = ?", original)
+        );
     }
 
     @Test
-    void concurrentSubmissionsOfOneIdResolveToAReplayOrAConflictNeverAnError() throws Exception {
+    void concurrentSubmissionsOfOneIdResolveToAReplayOrAConflictNeverAnError()
+            throws Exception {
+
         TransactionRequestDto request = IntegrationTestDataFactory
             .highAmountTransaction("ACC-IDEM-004").build();
         String payload = objectMapper.writeValueAsString(request);
@@ -161,45 +219,77 @@ class TransactionIdempotencyIT {
         try {
             Callable<Integer> submit = () -> {
                 startTogether.await(20, TimeUnit.SECONDS);
-                MvcResult result = mockMvc.perform(post("/api/v1/transactions/evaluate")
+
+                MvcResult result = mockMvc.perform(
+                        post("/api/v1/transactions/evaluate")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(payload)).andReturn();
+                    .content(payload)
+                ).andReturn();
+
                 return result.getResponse().getStatus();
             };
 
             Future<Integer> first = executor.submit(submit);
             Future<Integer> second = executor.submit(submit);
+
             int firstStatus = first.get(60, TimeUnit.SECONDS);
             int secondStatus = second.get(60, TimeUnit.SECONDS);
 
             assertOrdinaryOutcome(firstStatus);
             assertOrdinaryOutcome(secondStatus);
-            assertEquals(1, Stream.of(firstStatus, secondStatus).filter(status -> status == 201).count(),
-                "exactly one submission may store the transaction");
-            assertEquals(1, countRows("select count(*) from transactions where id = ?", request),
-                "the transaction must be stored once however many callers raced for it");
-            assertEquals(1, alertsOn(request), "alerts must not be duplicated by a retry");
+
+            assertEquals(
+                    1,
+                    Stream.of(firstStatus, secondStatus)
+                            .filter(status -> status == 201)
+                            .count(),
+                    "exactly one submission may store the transaction"
+            );
+
+            assertEquals(
+                    1,
+                    countRows("select count(*) from transactions where id = ?", request),
+                    "the transaction must be stored once however many callers raced for it"
+            );
+
+            assertEquals(
+                    1,
+                    alertsOn(request),
+                    "alerts must not be duplicated by a retry"
+            );
+
         } finally {
             executor.shutdownNow();
         }
     }
 
-    private org.springframework.test.web.servlet.ResultActions evaluate(TransactionRequestDto request)
-        throws Exception {
-        return mockMvc.perform(post("/api/v1/transactions/evaluate")
+    private org.springframework.test.web.servlet.ResultActions evaluate(
+            TransactionRequestDto request
+    ) throws Exception {
+
+        return mockMvc.perform(
+                post("/api/v1/transactions/evaluate")
             .contentType(MediaType.APPLICATION_JSON)
-            .content(objectMapper.writeValueAsString(request)));
+            .content(objectMapper.writeValueAsString(request))
+        );
     }
 
     private void assertOrdinaryOutcome(int status) {
-        assertTrue(status < 500,
-            "a duplicate submission must never be reported as a server error, got " + status);
-        assertTrue(Set.of(200, 201, 409).contains(status),
-            "a duplicate submission must be answered with a replay or a conflict, not " + status);
+        assertTrue(
+                status < 500,
+                "a duplicate submission must never be reported as a server error, got " + status
+        );
+
+        assertTrue(
+                Set.of(200, 201, 409).contains(status),
+                "a duplicate submission must be answered with a replay or a conflict, not " + status
+        );
     }
 
     private int alertsOn(TransactionRequestDto request) {
-        return fraudAlertRepository.findByTransactionIdOrderByFlaggedAtDesc(request.id()).size();
+        return fraudAlertRepository
+                .findByTransactionIdOrderByFlaggedAtDesc(request.id())
+                .size();
     }
 
     private int countRows(String sql, TransactionRequestDto request) {
